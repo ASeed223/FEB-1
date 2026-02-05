@@ -1,7 +1,7 @@
 ---
 - name: Nexus Configuration Test Deployment
-  hosts: all
-  become: yes
+  hosts: lxpd208
+  become: no
   vars:
     # Path Definitions
     nexus_base_path: "/opt/nexus"
