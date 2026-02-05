@@ -1,17 +1,40 @@
-- name: Nexus_HA_Full_Automated_Upgrade
+---
+- name: Nexus HA Full Automated Upgrade
   hosts: lxpd208
   gather_facts: no
   any_errors_fatal: true
-
+  
   vars_prompt:
     - name: "target_version"
       prompt: "Enter target version (e.g. 3.87.1)"
       private: no
 
   vars:
+    # -------------------------------------------------------
+    # PATH & USER CONFIGURATION
+    # -------------------------------------------------------
     nexus_root: "/opt/nexus"
     nexus_link: "/opt/nexus/nexus"
-    # cmdeploy ansible vault --> KeePass
+    nexus_data_dir: "/opt/nexus/sonatype-work/nexus3"
+    nexus_ssl_dir: "/opt/nexus/ssl"
+    
+    # Ownership (Matched to your environment)
+    deploy_user: "cmdeploy"
+    deploy_group: "edrstaff"
+    secondary_node: "lxpd209"
+
+    # -------------------------------------------------------
+    # PERFORMANCE & SSL CONFIGURATION
+    # -------------------------------------------------------
+    nexus_xms: "6G"
+    nexus_xmx: "6G"
+    nexus_max_direct_memory: "15530M"
+    
+    keystore_filename: "nexus01.jks"
+    # Plain text password for JVM (nexus.vmoptions)
+    keystore_password: "edrcmadm"
+    
+    # Encrypted OBF Password for Jetty (jetty-https.xml)
     keystore_password_obf: !vault |
           $ANSIBLE_VAULT;1.1;AES256
           61366338363366303634633763356166376432646562643066343466643532623532373030383266
@@ -20,10 +43,11 @@
           6132336431653139630a333532306132616139643766353466636331653032613865333564336265
           38626533366138633132636332616564303764363862326138333838313666346631636666613138
           6636393738393032383330323963653232656132623966633939
-    secondary_node: "lxpd209"
 
   tasks:
-    # PHASE 1: Preparation and Config lxpd208
+    # =======================================================
+    # PHASE 1: PREPARATION & EXTRACTION
+    # =======================================================
     - name: "Find Nexus tarball on lxpd208"
       ansible.builtin.find:
         paths: "{{ nexus_root }}"
@@ -50,60 +74,44 @@
         dest: "{{ nexus_root }}"
         remote_src: yes
         creates: "{{ new_nexus_dir }}"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
 
-    # 2. Configure nexus.vmoptions
-    - name: "Update vmoptions (Memory, Paths, and Missing Flags)"
-      ansible.builtin.lineinfile:
-        path: "{{ new_nexus_dir }}/bin/nexus.vmoptions"
-        regexp: "{{ item.regex }}"
-        line: "{{ item.line }}"
-      loop:
-        # Memory Settings
-        - { regex: '^-Xms', line: '-Xms6G' }
-        - { regex: '^-Xmx', line: '-Xmx6G' }
-        - { regex: '^-XX:MaxDirectMemorySize=', line: '-XX:MaxDirectMemorySize=15530M' }
-        
-        # Path Settings
-        - { regex: '^-Dkaraf.data=', line: '-Dkaraf.data=/opt/nexus/sonatype-work/nexus3' }
-        - { regex: '^-Dkaraf.log=', line: '-Dkaraf.log=/opt/nexus/sonatype-work/nexus3/log' }
-        - { regex: '^-Djava.io.tmpdir=', line: '-Djava.io.tmpdir=/opt/nexus/sonatype-work/nexus3/tmp' }
-        - { regex: '^-XX:LogFile=', line: '-XX:LogFile=/opt/nexus/sonatype-work/nexus3/log/jvm.log' }
-        
-        # Restore missing flags
-        - { regex: '^-Djava.net.preferIPv4Stack=', line: '-Djava.net.preferIPv4Stack=true' }
-        - { regex: '^-Dkaraf.startLocalConsole=', line: '-Dkaraf.startLocalConsole=false' }
+    # =======================================================
+    # PHASE 2: CONFIGURATION (USING TEMPLATES)
+    # =======================================================
+    - name: "Deploy nexus.vmoptions to new version"
+      ansible.builtin.template:
+        src: templates/nexus.vmoptions.j2
+        dest: "{{ new_nexus_dir }}/bin/nexus.vmoptions"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: '0644'
 
-    # 3. Configure jetty-https.xml
-    - name: "Update KeyStorePath to nexus01.jks"
-      ansible.builtin.replace:
-        path: "{{ new_nexus_dir }}/etc/jetty/jetty-https.xml"
-        regexp: '(<Property name="jetty.sslContext.keyStorePath" default=")(.*)(" />)'
-        replace: '\1nexus01.jks\3'
+    - name: "Deploy jetty-https.xml to new version"
+      ansible.builtin.template:
+        src: templates/jetty-https.xml.j2
+        dest: "{{ new_nexus_dir }}/etc/jetty/jetty-https.xml"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: '0644'
 
-    - name: "Update KeyStorePassword"
-      ansible.builtin.replace:
-        path: "{{ new_nexus_dir }}/etc/jetty/jetty-https.xml"
-        regexp: '(<Set name="KeyStorePassword">)(.*)(</Set>)'
-        replace: '\1{{ keystore_password_obf }}\3'
+    - name: "Verify SSL Certificate exists (Safety Check)"
+      ansible.builtin.stat:
+        path: "{{ nexus_ssl_dir }}/{{ keystore_filename }}"
+      register: cert_check
+      failed_when: not cert_check.stat.exists
 
-    - name: "Update KeyManagerPassword"
-      ansible.builtin.replace:
-        path: "{{ new_nexus_dir }}/etc/jetty/jetty-https.xml"
-        regexp: '(<Set name="KeyManagerPassword">)(.*)(</Set>)'
-        replace: '\1{{ keystore_password_obf }}\3'
-
-    - name: "Update TrustStorePassword"
-      ansible.builtin.replace:
-        path: "{{ new_nexus_dir }}/etc/jetty/jetty-https.xml"
-        regexp: '(<Set name="TrustStorePassword".*>)(.*)(</Set>)'
-        replace: '\1{{ keystore_password_obf }}\3'
-
-    # PHASE 2: Copy the upgrade file to lxpd209
+    # =======================================================
+    # PHASE 3: SYNC TO SECONDARY NODE
+    # =======================================================
     - name: "Sync configured folder to {{ secondary_node }} using rsync"
       ansible.builtin.shell: "rsync -avzP {{ new_nexus_dir }}/ {{ secondary_node }}:{{ new_nexus_dir }}/"
       register: rsync_result
 
-    # PHASE 3: Upgrade lxpd208
+    # =======================================================
+    # PHASE 4: UPGRADE LXPD208 (PRIMARY)
+    # =======================================================
     - name: "[lxpd208] Stop service"
       ansible.builtin.shell: "{{ nexus_link }}/bin/nexus stop"
       failed_when: false
@@ -121,6 +129,8 @@
         src: "{{ new_nexus_dir }}"
         dest: "{{ nexus_link }}"
         state: link
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
         force: yes
 
     - name: "[lxpd208] Start new service (Attempt 1)"
@@ -137,23 +147,26 @@
       delay: 10
       ignore_errors: yes
 
-    - name: "[lxpd208] Start new service (Attempt 2)"
+    # Retry logic for Primary Node
+    - name: "[lxpd208] Start new service (Attempt 2 - if failed)"
       ansible.builtin.shell: "{{ nexus_link }}/bin/nexus start"
       when: health_208 is failed
 
-    - name: "[lxpd208] Health Check (Wait for HTTP 200)"
+    - name: "[lxpd208] Health Check (Retry)"
       ansible.builtin.uri:
         url: "https://lxpd208:8443/service/rest/v1/status"
         validate_certs: no
         status_code: 200
-      register: health_208
-      until: health_208.status == 200
+      register: health_208_retry
+      until: health_208_retry.status == 200
       retries: 30
       delay: 10
       when: health_208 is failed
       ignore_errors: yes
 
-    # PHASE 4: Upgrade lxpd209
+    # =======================================================
+    # PHASE 5: UPGRADE LXPD209 (SECONDARY)
+    # =======================================================
     - name: "[lxpd209] Stop service"
       ansible.builtin.shell: "{{ nexus_link }}/bin/nexus stop"
       delegate_to: "{{ secondary_node }}"
@@ -173,6 +186,8 @@
         src: "{{ new_nexus_dir }}"
         dest: "{{ nexus_link }}"
         state: link
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
         force: yes
       delegate_to: "{{ secondary_node }}"
 
@@ -191,7 +206,9 @@
       delay: 10
       ignore_errors: yes
 
-    # PHASE 5: CLEANUP
+    # =======================================================
+    # PHASE 6: CLEANUP & SUMMARY
+    # =======================================================
     - name: "Move tarball to archive folder on lxpd208"
       ansible.builtin.command: "mv {{ nexus_tarball }} {{ nexus_root }}/archive/"
       args:
@@ -201,5 +218,5 @@
       ansible.builtin.debug:
         msg: 
           - "Upgrade to {{ target_version }} completed successfully."
-          - "Primary (lxpd208) status: {{ health_208.status | default('Failed') }}"
+          - "Primary (lxpd208) status: {{ health_208_retry.status | default(health_208.status) | default('Failed') }}"
           - "Secondary (lxpd209) status: {{ health_209.status | default('Failed') }}"
