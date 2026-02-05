@@ -1,50 +1,93 @@
--Xms{{ nexus_xms | default('2703m') }}
--Xmx{{ nexus_xmx | default('2703m') }}
--XX:MaxDirectMemorySize={{ nexus_max_direct_memory | default('2G') }}
--XX:+UnlockDiagnosticVMOptions
--XX:+LogVMOutput
--XX:LogFile={{ nexus_data_dir }}/log/jvm.log
--XX:-OmitStackTraceInFastThrow
--Djava.net.preferIPv4Stack=true
--Dfile.encoding=UTF-8
+jetty-https.xml
 
-# SSL Settings (Injecting your custom SSL config)
--Djavax.net.ssl.trustStore={{ nexus_data_dir }}/etc/ssl/{{ keystore_filename }}
--Djavax.net.ssl.trustStorePassword={{ keystore_password }}
--Djavax.net.ssl.keyStore={{ nexus_data_dir }}/etc/ssl/{{ keystore_filename }}
--Djavax.net.ssl.keyStorePassword={{ keystore_password }}
+<?xml version="1.0"?><!DOCTYPE Configure PUBLIC "-//Jetty//Configure//EN" "https://jetty.org/configure_10_0.dtd">
 
-# Path Settings (Replacing relative paths with absolute variable)
--Dkaraf.home=.
--Dkaraf.base=.
--Djava.util.logging.config.file=etc/spring/java.util.logging.properties
--Dkaraf.data={{ nexus_data_dir }}
--Dkaraf.log={{ nexus_data_dir }}/log
--Djava.io.tmpdir={{ nexus_data_dir }}/tmp
--Djdk.tls.ephemeralDHKeySize=2048
+<Configure id="Server" class="org.eclipse.jetty.server.Server">
 
-#
-# additional vmoptions needed for Java9+
-#
---add-reads=java.xml=java.logging
---add-opens
-java.base/java.security=ALL-UNNAMED
---add-opens
-java.base/java.net=ALL-UNNAMED
---add-opens
-java.base/java.lang=ALL-UNNAMED
---add-opens
-java.base/java.util=ALL-UNNAMED
---add-opens
-java.naming/javax.naming.spi=ALL-UNNAMED
---add-opens
-java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.http=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.https=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.jar=ALL-UNNAMED
---add-exports=jdk.xml.dom/org.w3c.dom.html=ALL-UNNAMED
---add-exports=jdk.naming.rmi/com.sun.jndi.url.rmi=ALL-UNNAMED
---add-exports=java.security.sasl/com.sun.security.sasl=ALL-UNNAMED
---add-exports=java.base/sun.security.x509=ALL-UNNAMED
---add-exports=java.base/sun.security.rsa=ALL-UNNAMED
---add-exports=java.base/sun.security.pkcs=ALL-UNNAMED
+  <New id="httpsConfig" class="org.eclipse.jetty.server.HttpConfiguration">
+    <Arg><Ref refid="baseHttpConfig"/></Arg>
+    <Set name="securePort"><Property name="application-port-ssl" /></Set>
+    <Call name="addCustomizer">
+      <Arg>
+        <New id="secureRequestCustomizer" class="org.eclipse.jetty.server.SecureRequestCustomizer">
+          <Set name="stsMaxAge"><Property name="jetty.https.stsMaxAge" default="7776000"/></Set>
+          <Set name="stsIncludeSubDomains"><Property name="jetty.https.stsIncludeSubDomains" default="false"/></Set>
+          <Set name="sniHostCheck"><Property name="jetty.https.sniHostCheck" default="false"/></Set>
+        </New>
+      </Arg>
+    </Call>
+  </New>
+
+  <New id="sslContextFactory" class="org.eclipse.jetty.util.ssl.SslContextFactory$Server">
+    <Set name="Provider" property="jetty.sslContext.provider" />
+    <Set name="KeyStorePath">
+      <Call name="resolvePath" class="org.eclipse.jetty.xml.XmlConfiguration">
+        <Arg><Property name="ssl.etc"/></Arg>
+        <Arg><Property name="jetty.sslContext.keyStorePath" default="keystore.jks" /></Arg>
+      </Call>
+    </Set>
+    <Set name="KeyStorePassword">password</Set>
+    <Set name="KeyStoreType" property="jetty.sslContext.keyStoreType" />
+    <Set name="KeyStoreProvider" property="jetty.sslContext.keyStoreProvider" />
+    <Set name="KeyManagerPassword">password</Set>
+    <Set name="TrustStorePath">
+      <Call name="resolvePath" class="org.eclipse.jetty.xml.XmlConfiguration">
+        <Arg><Property name="ssl.etc"/></Arg>
+        <Arg><Property name="jetty.sslContext.keyStorePath" default="keystore.jks" /></Arg>
+      </Call>
+    </Set>
+    <Set name="TrustStorePassword" property="jetty.sslContext.trustStorePassword">password</Set>
+    <Set name="TrustStoreType" property="jetty.sslContext.trustStoreType" />
+    <Set name="TrustStoreProvider" property="jetty.sslContext.trustStoreProvider" />
+    <Set name="EndpointIdentificationAlgorithm" property="jetty.sslContext.endpointIdentificationAlgorithm" />
+    <Set name="NeedClientAuth" property="jetty.sslContext.needClientAuth" />
+    <Set name="WantClientAuth" property="jetty.sslContext.wantClientAuth" />
+    <Set name="useCipherSuitesOrder" property="jetty.sslContext.useCipherSuitesOrder" />
+    <Set name="sslSessionCacheSize" property="jetty.sslContext.sslSessionCacheSize" />
+    <Set name="sslSessionTimeout" property="jetty.sslContext.sslSessionTimeout" />
+    <Set name="RenegotiationAllowed" property="jetty.sslContext.renegotiationAllowed" />
+    <Set name="RenegotiationLimit" property="jetty.sslContext.renegotiationLimit" />
+    <Set name="SniRequired" property="jetty.sslContext.sniRequired" />
+  </New>
+
+  <Call name="addConnector">
+    <Arg>
+      <New id="httpsConnector" class="org.eclipse.jetty.server.ServerConnector">
+        <Arg name="server"><Ref refid="Server" /></Arg>
+        <Arg name="acceptors" type="int"><Property name="jetty.ssl.acceptors" default="1"/></Arg>
+        <Arg name="selectors" type="int"><Property name="jetty.ssl.selectors" default="-1"/></Arg>
+        <Arg name="factories">
+          <Array type="org.eclipse.jetty.server.ConnectionFactory">
+            <Item>
+              <New class="org.sonatype.nexus.bootstrap.jetty.InstrumentedConnectionFactory">
+                <Arg>
+                  <New class="org.eclipse.jetty.server.SslConnectionFactory">
+                    <Arg name="next">http/1.1</Arg>
+                    <Arg name="sslContextFactory"><Ref refid="sslContextFactory"/></Arg>
+                  </New>
+                </Arg>
+              </New>
+            </Item>
+            <Item>
+              <New class="org.eclipse.jetty.server.HttpConnectionFactory">
+                <Arg name="config"><Ref refid="httpsConfig" /></Arg>
+              </New>
+            </Item>
+          </Array>
+        </Arg>
+
+        <Set name="host"><Property name="application-host" /></Set>
+        <Set name="port"><Property name="application-port-ssl" /></Set>
+        <Set name="idleTimeout"><Property name="jetty.ssl.idleTimeout" default="30000"/></Set>
+        <Set name="acceptorPriorityDelta" property="jetty.ssl.acceptorPriorityDelta"/>
+        <Set name="acceptQueueSize" property="jetty.ssl.acceptQueueSize"/>
+        <Set name="reuseAddress"><Property name="jetty.ssl.reuseAddress" default="true"/></Set>
+        <Set name="reusePort"><Property name="jetty.ssl.reusePort" default="false"/></Set>
+        <Set name="acceptedTcpNoDelay"><Property name="jetty.ssl.acceptedTcpNoDelay" default="true"/></Set>
+        <Set name="acceptedReceiveBufferSize" property="jetty.ssl.acceptedReceiveBufferSize" />
+        <Set name="acceptedSendBufferSize" property="jetty.ssl.acceptedSendBufferSize" />
+      </New>
+    </Arg>
+  </Call>
+
+</Configure>
