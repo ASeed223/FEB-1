@@ -1,9 +1,6 @@
--Djavax.net.ssl.trustStore=/opt/nexus/ssl/nexus01.jks
-
-
 -Xms{{ nexus_xms | default('2703m') }}
 -Xmx{{ nexus_xmx | default('2703m') }}
--XX:MaxDirectMemorySize={{ nexus_max_direct_memory | default('2G') }}
+-XX:MaxDirectMemorySize={{ nexus_max_direct_memory | default('15530M') }}
 -XX:+UnlockDiagnosticVMOptions
 -XX:+LogVMOutput
 -XX:LogFile={{ nexus_data_dir }}/log/jvm.log
@@ -11,9 +8,9 @@
 -Djava.net.preferIPv4Stack=true
 -Dfile.encoding=UTF-8
 
--Djavax.net.ssl.trustStore={{ nexus_data_dir }}/ssl/{{ keystore_filename }}
+-Djavax.net.ssl.trustStore={{ nexus_ssl_dir }}/{{ keystore_filename }}
 -Djavax.net.ssl.trustStorePassword={{ keystore_password }}
--Djavax.net.ssl.keyStore={{ nexus_data_dir }}/ssl/{{ keystore_filename }}
+-Djavax.net.ssl.keyStore={{ nexus_ssl_dir }}/{{ keystore_filename }}
 -Djavax.net.ssl.keyStorePassword={{ keystore_password }}
 
 -Dkaraf.home=.
@@ -23,7 +20,7 @@
 -Dkaraf.log={{ nexus_data_dir }}/log
 -Djava.io.tmpdir={{ nexus_data_dir }}/tmp
 -Djdk.tls.ephemeralDHKeySize=2048
--Dfile.encoding=UTF-8
+
 #
 # additional vmoptions needed for Java9+
 #
