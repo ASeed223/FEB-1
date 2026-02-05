@@ -1,48 +1,67 @@
--Xms{{ nexus_xms | default('2703m') }}
--Xmx{{ nexus_xmx | default('2703m') }}
--XX:MaxDirectMemorySize={{ nexus_max_direct_memory | default('15530M') }}
--XX:+UnlockDiagnosticVMOptions
--XX:+LogVMOutput
--XX:LogFile={{ nexus_data_dir }}/log/jvm.log
--XX:-OmitStackTraceInFastThrow
--Djava.net.preferIPv4Stack=true
--Dfile.encoding=UTF-8
+---
+- name: Nexus Configuration Test Deployment
+  hosts: lxpd208
+  become: no
+  vars:
+    # Path Definitions
+    nexus_base_path: "/opt/nexus"
+    nexus_test_dir: "{{ nexus_base_path }}/test"
+    
+    # Internal paths used in config templates
+    nexus_data_dir: "{{ nexus_base_path }}/sonatype-work/nexus3"
+    nexus_ssl_dir: "{{ nexus_base_path }}/ssl"
+    
+    # Ownership
+    deploy_user: "cmdeploy"
+    deploy_group: "edrstaff"
+    
+    # Performance Parameters
+    nexus_xms: "6G"
+    nexus_xmx: "6G"
+    nexus_max_direct_memory: "15530M"
+    
+    # Certificate and Passwords
+    keystore_filename: "nexus01.jks"
+    keystore_password: "edrcmadm"
+    keystore_password_obf: "OBF:1unr1sov1uvk1u9h1ua11uum1sov1uo7"
 
--Djavax.net.ssl.trustStore={{ nexus_ssl_dir }}/{{ keystore_filename }}
--Djavax.net.ssl.trustStorePassword={{ keystore_password }}
--Djavax.net.ssl.keyStore={{ nexus_ssl_dir }}/{{ keystore_filename }}
--Djavax.net.ssl.keyStorePassword={{ keystore_password }}
+  tasks:
+    - name: Ensure test directory exists
+      file:
+        path: "{{ nexus_test_dir }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: '0755'
 
--Dkaraf.home=.
--Dkaraf.base=.
--Djava.util.logging.config.file=etc/spring/java.util.logging.properties
--Dkaraf.data={{ nexus_data_dir }}
--Dkaraf.log={{ nexus_data_dir }}/log
--Djava.io.tmpdir={{ nexus_data_dir }}/tmp
--Djdk.tls.ephemeralDHKeySize=2048
+    - name: Generate nexus.vmoptions in test folder
+      template:
+        src: templates/nexus.vmoptions.j2
+        dest: "{{ nexus_test_dir }}/nexus.vmoptions"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: '0644'
+        backup: yes
+      register: vm_test
 
-#
-# additional vmoptions needed for Java9+
-#
---add-reads=java.xml=java.logging
---add-opens
-java.base/java.security=ALL-UNNAMED
---add-opens
-java.base/java.net=ALL-UNNAMED
---add-opens
-java.base/java.lang=ALL-UNNAMED
---add-opens
-java.base/java.util=ALL-UNNAMED
---add-opens
-java.naming/javax.naming.spi=ALL-UNNAMED
---add-opens
-java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.http=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.https=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.jar=ALL-UNNAMED
---add-exports=jdk.xml.dom/org.w3c.dom.html=ALL-UNNAMED
---add-exports=jdk.naming.rmi/com.sun.jndi.url.rmi=ALL-UNNAMED
---add-exports=java.security.sasl/com.sun.security.sasl=ALL-UNNAMED
---add-exports=java.base/sun.security.x509=ALL-UNNAMED
---add-exports=java.base/sun.security.rsa=ALL-UNNAMED
---add-exports=java.base/sun.security.pkcs=ALL-UNNAMED
+    - name: Generate jetty-https.xml in test folder
+      template:
+        src: templates/jetty-https.xml.j2
+        dest: "{{ nexus_test_dir }}/jetty-https.xml"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: '0644'
+        backup: yes
+      register: jetty_test
+
+    - name: Verify if certificate exists at correct path
+      stat:
+        path: "{{ nexus_ssl_dir }}/{{ keystore_filename }}"
+      register: jks_check
+
+    - name: Display deployment status
+      debug:
+        msg: 
+          - "VMOptions Path: {{ nexus_test_dir }}/nexus.vmoptions"
+          - "Jetty XML Path: {{ nexus_test_dir }}/jetty-https.xml"
+          - "SSL Certificate ({{ nexus_ssl_dir }}): {{ 'Found' if jks_check.stat.exists else 'Missing' }}"
