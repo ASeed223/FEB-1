@@ -9,6 +9,10 @@
     nexus_data_dir: "{{ nexus_base_path }}/sonatype-work/nexus3"
     nexus_ssl_dir: "{{ nexus_base_path }}/ssl"
     
+    # Ownership Definitions (Updated based on your environment)
+    deploy_user: "cmdeploy"
+    deploy_group: "edrstaff"
+    
     # Performance Parameters
     nexus_xms: "6G"
     nexus_xmx: "6G"
@@ -24,8 +28,8 @@
       file:
         path: "{{ item }}"
         state: directory
-        owner: nexus
-        group: nexus
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
         mode: '0755'
       loop:
         - "{{ nexus_install_dir }}/bin"
@@ -36,8 +40,8 @@
       template:
         src: templates/nexus.vmoptions.j2
         dest: "{{ nexus_install_dir }}/bin/nexus.vmoptions"
-        owner: nexus
-        group: nexus
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
         mode: '0644'
         backup: yes
       register: vm_test
@@ -46,8 +50,8 @@
       template:
         src: templates/jetty-https.xml.j2
         dest: "{{ nexus_install_dir }}/etc/jetty/jetty-https.xml"
-        owner: nexus
-        group: nexus
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
         mode: '0644'
         backup: yes
       register: jetty_test
