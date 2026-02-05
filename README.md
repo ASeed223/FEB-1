@@ -1,45 +1,7 @@
--Xms6G
--Xmx6G
--XX:MaxDirectMemorySize=15530M
--XX:+UnlockDiagnosticVMOptions
--XX:+LogVMOutput
--XX:LogFile=/opt/nexus/sonatype-work/nexus3/log/jvm.log
--XX:-OmitStackTraceInFastThrow
--Djava.net.preferIPv4Stack=true
--Dfile.encoding=UTF-8
+Good morning everyone,
+Yesterday morning I mainly focused on the OCP learning session with Riley, Philip, and Shelly. Thanks to Riley for walking us through everything and helping me refresh my OCP knowledge.
 
--Djavax.net.ssl.trustStore=/opt/nexus/ssl/nexus01.jks
--Djavax.net.ssl.trustStorePassword=edrcmadm
--Djavax.net.ssl.keyStore=/opt/nexus/ssl/nexus01.jks
--Djavax.net.ssl.keyStorePassword=edrcmadm
+Other than that, I continued configuring the files for the Nexus upgrade. I also noticed that Sonatype released another upgrade just two days ago.
 
--Dkaraf.home=.
--Dkaraf.base=.
--Djava.util.logging.config.file=etc/spring/java.util.logging.properties
--Dkaraf.data=/opt/nexus/sonatype-work/nexus3
--Dkaraf.log=/opt/nexus/sonatype-work/nexus3/log
--Djava.io.tmpdir=/opt/nexus/sonatype-work/nexus3/tmp
--Djdk.tls.ephemeralDHKeySize=2048
-
---add-reads=java.xml=java.logging
---add-opens
-java.base/java.security=ALL-UNNAMED
---add-opens
-java.base/java.net=ALL-UNNAMED
---add-opens
-java.base/java.lang=ALL-UNNAMED
---add-opens
-java.base/java.util=ALL-UNNAMED
---add-opens
-java.naming/javax.naming.spi=ALL-UNNAMED
---add-opens
-java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.http=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.https=ALL-UNNAMED
---add-exports=java.base/sun.net.www.protocol.jar=ALL-UNNAMED
---add-exports=jdk.xml.dom/org.w3c.dom.html=ALL-UNNAMED
---add-exports=jdk.naming.rmi/com.sun.jndi.url.rmi=ALL-UNNAMED
---add-exports=java.security.sasl/com.sun.security.sasl=ALL-UNNAMED
---add-exports=java.base/sun.security.x509=ALL-UNNAMED
---add-exports=java.base/sun.security.rsa=ALL-UNNAMED
---add-exports=java.base/sun.security.pkcs=ALL-UNNAMED
+For today, I’ll run the Ansible playbook to upgrade Nexus HA as a test, and plan to apply this update to our current Nexus next week.
+That’s my plan for today.
