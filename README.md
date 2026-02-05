@@ -21,20 +21,20 @@
     <Set name="KeyStorePath">
       <Call name="resolvePath" class="org.eclipse.jetty.xml.XmlConfiguration">
         <Arg><Property name="ssl.etc"/></Arg>
-        <Arg><Property name="jetty.sslContext.keyStorePath" default="nexus01.jks" /></Arg>
+        <Arg><Property name="jetty.sslContext.keyStorePath" default="{{ keystore_filename }}" /></Arg>
       </Call>
     </Set>
-    <Set name="KeyStorePassword">OBF:1unr1sov1uvk1u9h1ua11uum1sov1uo7</Set>
+    <Set name="KeyStorePassword">{{ keystore_password_obf }}</Set>
     <Set name="KeyStoreType" property="jetty.sslContext.keyStoreType" />
     <Set name="KeyStoreProvider" property="jetty.sslContext.keyStoreProvider" />
-    <Set name="KeyManagerPassword">OBF:1unr1sov1uvk1u9h1ua11uum1sov1uo7</Set>
+    <Set name="KeyManagerPassword">{{ keystore_password_obf }}</Set>
     <Set name="TrustStorePath">
       <Call name="resolvePath" class="org.eclipse.jetty.xml.XmlConfiguration">
         <Arg><Property name="ssl.etc"/></Arg>
-        <Arg><Property name="jetty.sslContext.keyStorePath" default="nexus01.jks" /></Arg>
+        <Arg><Property name="jetty.sslContext.keyStorePath" default="{{ keystore_filename }}" /></Arg>
       </Call>
     </Set>
-    <Set name="TrustStorePassword" property="jetty.sslContext.trustStorePassword">OBF:1unr1sov1uvk1u9h1ua11uum1sov1uo7</Set>
+    <Set name="TrustStorePassword" property="jetty.sslContext.trustStorePassword">{{ keystore_password_obf }}</Set>
     <Set name="TrustStoreType" property="jetty.sslContext.trustStoreType" />
     <Set name="TrustStoreProvider" property="jetty.sslContext.trustStoreProvider" />
     <Set name="EndpointIdentificationAlgorithm" property="jetty.sslContext.endpointIdentificationAlgorithm" />
