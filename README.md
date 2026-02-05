@@ -1,26 +1,31 @@
--Xms6G
--Xmx6G
--XX:MaxDirectMemorySize=15530M
+-Xms{{ nexus_xms | default('2703m') }}
+-Xmx{{ nexus_xmx | default('2703m') }}
+-XX:MaxDirectMemorySize={{ nexus_max_direct_memory | default('2G') }}
 -XX:+UnlockDiagnosticVMOptions
 -XX:+LogVMOutput
--XX:LogFile=/opt/appdata/nexus/sonatype-work/nexus3/log/jvm.log
+-XX:LogFile={{ nexus_data_dir }}/log/jvm.log
 -XX:-OmitStackTraceInFastThrow
 -Djava.net.preferIPv4Stack=true
 -Dfile.encoding=UTF-8
 
--Djavax.net.ssl.trustStore=/opt/appdata/nexus/sonatype-work/nexus3/etc/ssl/nexusrepo.jks
--Djavax.net.ssl.trustStorePassword=edrcmadm
--Djavax.net.ssl.keyStore=/opt/appdata/nexus/sonatype-work/nexus3/etc/ssl/nexusrepo.jks
--Djavax.net.ssl.keyStorePassword=edrcmadm
+# SSL Settings (Injecting your custom SSL config)
+-Djavax.net.ssl.trustStore={{ nexus_data_dir }}/etc/ssl/{{ keystore_filename }}
+-Djavax.net.ssl.trustStorePassword={{ keystore_password }}
+-Djavax.net.ssl.keyStore={{ nexus_data_dir }}/etc/ssl/{{ keystore_filename }}
+-Djavax.net.ssl.keyStorePassword={{ keystore_password }}
 
+# Path Settings (Replacing relative paths with absolute variable)
 -Dkaraf.home=.
 -Dkaraf.base=.
 -Djava.util.logging.config.file=etc/spring/java.util.logging.properties
--Dkaraf.data=/opt/nexus/sonatype-work/nexus3
--Dkaraf.log=/opt/nexus/sonatype-work/nexus3/log
--Djava.io.tmpdir=/opt/nexus/sonatype-work/nexus3/tmp
+-Dkaraf.data={{ nexus_data_dir }}
+-Dkaraf.log={{ nexus_data_dir }}/log
+-Djava.io.tmpdir={{ nexus_data_dir }}/tmp
 -Djdk.tls.ephemeralDHKeySize=2048
 
+#
+# additional vmoptions needed for Java9+
+#
 --add-reads=java.xml=java.logging
 --add-opens
 java.base/java.security=ALL-UNNAMED
