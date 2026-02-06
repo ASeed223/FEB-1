@@ -1,1 +1,1 @@
-com.sonatype.nexus.crypto.MasterPasswordConfiguration.passphrase=
+-Dcom.sonatype.nexus.crypto.MasterPasswordConfiguration.passphrase=你的密码
