@@ -1,5 +1,3 @@
-Hi,
+I’m not 100% sure about this case since my jumpbox isn’t using DHCP, so I’m not sure if others might have a better suggestion.
 
-Based on the task, I’ve already granted him permission to access Nexus. If he’s still unable to load the Nexus page, it’s most likely that he needs to submit an ACL request.
-
-The attached file is the template for the Nexus ACL, and here’s the wiki with the steps.
+If possible, I’d recommend submitting the ACL using the IPv4 address that starts with 10.xx.xxx.xxx for now. Once someone starts working on your ACL request, you can follow up directly with them; they may have a better recommendation based on how the ACL is handled.
