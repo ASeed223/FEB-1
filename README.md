@@ -1,3 +1,5 @@
-Good morning everyone, just a quick update from me.
-Yesterday, besides meetings, I spent most of the day improving my Ansible playbook that automates the Nexus HA upgrade by refactoring it to use the Ansible template feature. This should make the playbook much easier to maintain going forward, especially since configuration file formats can change between each nexus upgrades. Using templates allows us to handle those changes more cleanly and reduces the risk of manual errors during future maintenance.
-I’m almost done with the coding part, and today I should be able to run another test upgrade in the Nexus HA environment. I’ll also be out of the office for about an hour later today for an appointment. That’s my plan for today.
+Hi,
+
+Based on the task, I’ve already granted him permission to access Nexus. If he’s still unable to load the Nexus page, it’s most likely that he needs to submit an ACL request.
+
+The attached file is the template for the Nexus ACL, and here’s the wiki with the steps.
