@@ -1,7 +1,7 @@
-Good morning everyone,
+Good morning everyone, just a quick update from me.
 
-Last Friday, I was able to run the updated Ansible playbook to upgrade Nexus HA to the latest version that was released last week. Other than that, I investigated a potential solution for setting up the secret encryption key to remediate the error we saw after the upgrade, since newer versions of Nexus require configuring a Master Encryption Key to encrypt and protect sensitive credentials.
+Yesterday, besides working on a couple of PEGA ZIP deployments to TST3 and DEV3, I mainly focused on updating the IQ scan pipeline to scan the latest branch. I’ve completed all the necessary code changes and will be pushing the code to the repo and running some test runs to make sure everything works as expected.
 
-As for today, it’s pretty much the same — I’ll continue working on that and also start updating the IQ scan pipeline to scan the newer branch for the security team.
+For today, I’ll also be meeting again with Philip, Riley, and Shelly on Philip’s PBI, and continuing to work on the tasks on my board.
 
 That’s my plan for today.
