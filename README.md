@@ -1,7 +1,5 @@
-Good morning everyone, just a quick update from me.
+Morning Jay,
 
-Yesterday, besides working on a couple of PEGA ZIP deployments to TST3 and DEV3, I mainly focused on updating the IQ scan pipeline to scan the latest branch. I’ve completed all the necessary code changes and will be pushing the code to the repo and running some test runs to make sure everything works as expected.
+I just spoke with James this morning, and it looks like he’s not able to access the IQ server page. I checked the organization access, and James is in the same role as David.
 
-For today, I’ll also be meeting again with Philip, Riley, and Shelly on Philip’s PBI, and continuing to work on the tasks on my board.
-
-That’s my plan for today.
+However, it seems like James doesn’t have permission to access the IQ server, as he’s seeing a “can’t reach this page” message. Do you know if James needs to submit an additional ACL request for the IQ server (lxpd196), or if there’s a security group that his supervisor needs to add him to?
