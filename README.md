@@ -1,5 +1,1 @@
-Hi Jay,
-
-I’m about to send out a notification about the Nexus upgrade on 02/12 and the expected downtime.
-
-Is it okay to use the usual on-call email distribution list, or should we add anyone else? Just want to make sure the list is sufficient.
+We are performing a Nexus upgrade. Since it has been a while since the last update, we're anticipating a brief outage. If the process goes smoothly, it should be completed within 15 minutes, which will affect OCP pods during image pulls. However, if we encounter any issues, we will allocate time for troubleshooting. In the worst-case scenario, we are prepared to perform a full rollback, as legacy builds and deployments might be affected if the upgrade does not go smoothly.
