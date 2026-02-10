@@ -1,5 +1,5 @@
-Morning Jay,
+Hi Jay,
 
-I just spoke with James this morning, and it looks like he’s not able to access the IQ server page. I checked the organization access, and James is in the same role as David.
+I’m about to send out a notification about the Nexus upgrade on 02/12 and the expected downtime.
 
-However, it seems like James doesn’t have permission to access the IQ server, as he’s seeing a “can’t reach this page” message. Do you know if James needs to submit an additional ACL request for the IQ server (lxpd196), or if there’s a security group that his supervisor needs to add him to?
+Is it okay to use the usual on-call email distribution list, or should we add anyone else? Just want to make sure the list is sufficient.
