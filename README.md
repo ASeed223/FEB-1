@@ -1,1 +1,11 @@
-We are performing a Nexus upgrade. Since it has been a while since the last update, we're anticipating a brief outage. If the process goes smoothly, it should be completed within 15 minutes, which will affect OCP pods during image pulls. However, if we encounter any issues, we will allocate time for troubleshooting. In the worst-case scenario, we are prepared to perform a full rollback, as legacy builds and deployments might be affected if the upgrade does not go smoothly.
+CM Team pre tasks:
+1.  Download and stage nexus-3.68.0-04-java8-unix.tar.gz to lxpd195. - Done
+2. Expand and edit configuration files - Done
+3. Update the nexus soft-link /opt/appdata/nexus/nexus - ToDo
+
+During Upgrade:
+-Snapshot lxpd195 and lxpd194 at 8:00 AM - Linux Admin
+-Shutdown Nexus repository and PostgreSQL DB at 8:10 AM- CM Team
+-Start PostgreSQL DB Nexus repository , Upgrade-Start Nexus repository& validate at 8:15 AM  - CM Team
+Rollback Plan:
+ 1. Restore snapshots to lxpd195 and lxpd194 - Linux admins.
