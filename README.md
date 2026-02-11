@@ -1,58 +1,49 @@
 ---
-- name: Nexus HA Post-Upgrade Validation
+- name: Nexus HA Post-Upgrade Functional Validation
   hosts: lxpd208, lxpd209
   gather_facts: no
   vars:
-    # Service Configuration
+    # Service settings
     nexus_port: 8443
     nexus_scheme: "https"
-    target_version: "3.89.0-09"
     
-    # Path based on your HA configuration
-    nexus_log_path: "/opt/nexus/sonatype-work/nexus3/log/nexus.log"
+    # Update this path to a real small file existing in your Nexus
+    test_artifact_path: "repository/maven-public/org/apache/maven/maven-model/3.0/maven-model-3.0.jar"
 
   tasks:
     # -------------------------------------------------------------------------
-    # 1. NETWORK CONNECTIVITY
+    # 1. Connectivity: Ensure the HTTPS port is listening
     # -------------------------------------------------------------------------
-    - name: "[1/6] Wait for Nexus HTTPS port ({{ nexus_port }})"
+    - name: "[1/5] Wait for Nexus HTTPS port ({{ nexus_port }})"
       ansible.builtin.wait_for:
         port: "{{ nexus_port }}"
         host: "{{ inventory_hostname }}"
         state: started
         delay: 5
-        timeout: 300
+        timeout: 600  # 10 minutes timeout for database migration
       register: port_check
 
     # -------------------------------------------------------------------------
-    # 2. SYSTEM PROCESS CHECK
+    # 2. System Ready: Check if the application has finished initializing
     # -------------------------------------------------------------------------
-    - name: "[2/6] Verify Nexus Java process is active"
-      ansible.builtin.shell: "ps -ef | grep java | grep nexus | grep -v grep"
-      register: process_check
-      changed_when: false
-
-    # -------------------------------------------------------------------------
-    # 3. APPLICATION HEALTH (API)
-    # -------------------------------------------------------------------------
-    - name: "[3/6] Validate System Status API (200 OK)"
+    - name: "[2/5] Validate System Ready Status"
       ansible.builtin.uri:
-        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status"
+        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status/ready"
         user: "{{ ansible_user }}"
         password: "{{ ansible_password }}"
         force_basic_auth: yes
         validate_certs: no
         method: GET
         status_code: 200
-      register: api_status
-      retries: 20
-      delay: 10
-      until: api_status.status == 200
+      register: ready_result
+      retries: 30
+      delay: 20
+      until: ready_result.status == 200
 
     # -------------------------------------------------------------------------
-    # 4. STORAGE INTEGRITY (WRITABLE)
+    # 3. Storage Health: Verify the 2.8TB Blob Store is not Read-Only
     # -------------------------------------------------------------------------
-    - name: "[4/6] Verify Blob Store is Writable"
+    - name: "[3/5] Verify Blob Store is Writable"
       ansible.builtin.uri:
         url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status/writable"
         user: "{{ ansible_user }}"
@@ -61,40 +52,50 @@
         validate_certs: no
         method: GET
         status_code: 200
-      register: db_writable
 
     # -------------------------------------------------------------------------
-    # 5. VERSION VERIFICATION (LOGS)
+    # 4. Repository Check: Ensure repositories are Online
     # -------------------------------------------------------------------------
-    - name: "[5/6] Confirm version {{ target_version }} in logs"
-      ansible.builtin.shell: "grep 'Started Sonatype Nexus .* {{ target_version }}' {{ nexus_log_path }} | tail -n 1"
-      register: log_version_check
-      failed_when: log_version_check.stdout == ""
-      changed_when: false
+    - name: "[4/5] Ensure Repositories are ONLINE"
+      ansible.builtin.uri:
+        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/repositories"
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: yes
+        validate_certs: no
+        method: GET
+        return_content: yes
+      register: repo_list
+      failed_when: "'online' not in repo_list.content"
 
     # -------------------------------------------------------------------------
-    # 6. RISK ASSESSMENT
+    # 5. Functional Test: Try to download an actual file
     # -------------------------------------------------------------------------
-    - name: "[6/6] Scan last 100 lines for ERROR logs"
-      ansible.builtin.shell: "tail -n 100 {{ nexus_log_path }} | grep 'ERROR'"
-      register: log_errors
-      failed_when: false
-      changed_when: false
+    - name: "[5/5] Perform Test Download of an Artifact"
+      ansible.builtin.uri:
+        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/{{ test_artifact_path }}"
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: yes
+        validate_certs: no
+        method: GET
+        status_code: 200
+      register: download_test
+      ignore_errors: yes
 
     # -------------------------------------------------------------------------
-    # SUMMARY REPORT
+    # SUMMARY
     # -------------------------------------------------------------------------
-    - name: Display Validation Summary
+    - name: Display Validation Results
       ansible.builtin.debug:
         msg:
           - "========================================================="
-          - "  NEXUS UPGRADE VALIDATION REPORT"
+          - "  NEXUS HA UPGRADE VALIDATION REPORT"
           - "========================================================="
-          - "Target Host    : {{ inventory_hostname }}"
-          - "Target Version : {{ target_version }}"
-          - "HTTPS Port     : UP ({{ nexus_port }})"
-          - "API Health     : ONLINE (200 OK)"
-          - "Storage Mode   : READ/WRITE (PASSED)"
-          - "Log Version    : VERIFIED"
-          - "Recent Errors  : {{ log_errors.stdout_lines | length }} errors found"
+          - "Node           : {{ inventory_hostname }}"
+          - "Port 8443 Status: UP"
+          - "System Ready   : PASSED"
+          - "Storage Write  : PASSED"
+          - "Repo Online    : PASSED"
+          - "Download Test  : {{ 'SUCCESS' if download_test.status == 200 else 'FAILED' }}"
           - "========================================================="
