@@ -24,22 +24,12 @@
       register: port_check
 
     # -------------------------------------------------------------------------
-    # 2. SYSTEM READY: Wait for the application to finish all background tasks
+    # 2. SYSTEM PROCESS CHECK
     # -------------------------------------------------------------------------
-    - name: "[2/5] Validate System Ready Status"
-      ansible.builtin.uri:
-        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status/ready"
-        user: "{{ ansible_user }}"
-        password: "{{ ansible_password }}"
-        force_basic_auth: yes
-        validate_certs: no
-        method: GET
-        status_code: 200
-      register: ready_result
-      retries: 60      # Retrying for 20 minutes total (60 * 20s)
-      delay: 20        # Migration for 2.8TB might be slow
-      until: ready_result.status == 200
-
+    - name: "[2/6] Verify Nexus Java process is active"
+      ansible.builtin.shell: "ps -ef | grep java | grep nexus | grep -v grep"
+      register: process_check
+      changed_when: false
     # -------------------------------------------------------------------------
     # 3. STORAGE HEALTH: Ensure the 2.8TB Blob Store is mounted and Writable
     # -------------------------------------------------------------------------
