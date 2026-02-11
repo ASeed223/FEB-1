@@ -1,5 +1,5 @@
 ---
-- name: Nexus HA Post-Upgrade Functional Validation
+- name: Nexus HA Post-Upgrade Business Validation
   hosts: lxpd208, lxpd209
   gather_facts: no
   vars:
@@ -7,12 +7,12 @@
     nexus_port: 8443
     nexus_scheme: "https"
     
-    # Update this path to a real small file existing in your Nexus
-    test_artifact_path: "repository/maven-public/org/apache/maven/maven-model/3.0/maven-model-3.0.jar"
+    # ACTION REQUIRED: Update this to a real file path in your Nexus (e.g., .xml, .pom, or .jar)
+    test_artifact_path: "repository/maven-public/org/apache/maven/maven-model/3.0/maven-metadata.xml"
 
   tasks:
     # -------------------------------------------------------------------------
-    # 1. Connectivity: Ensure the HTTPS port is listening
+    # 1. CONNECTIVITY: Ensure the HTTPS port is listening
     # -------------------------------------------------------------------------
     - name: "[1/5] Wait for Nexus HTTPS port ({{ nexus_port }})"
       ansible.builtin.wait_for:
@@ -20,11 +20,11 @@
         host: "{{ inventory_hostname }}"
         state: started
         delay: 5
-        timeout: 600  # 10 minutes timeout for database migration
+        timeout: 600  # 10 min timeout to allow for Database Migration
       register: port_check
 
     # -------------------------------------------------------------------------
-    # 2. System Ready: Check if the application has finished initializing
+    # 2. SYSTEM READY: Wait for the application to finish all background tasks
     # -------------------------------------------------------------------------
     - name: "[2/5] Validate System Ready Status"
       ansible.builtin.uri:
@@ -36,12 +36,12 @@
         method: GET
         status_code: 200
       register: ready_result
-      retries: 30
-      delay: 20
+      retries: 60      # Retrying for 20 minutes total (60 * 20s)
+      delay: 20        # Migration for 2.8TB might be slow
       until: ready_result.status == 200
 
     # -------------------------------------------------------------------------
-    # 3. Storage Health: Verify the 2.8TB Blob Store is not Read-Only
+    # 3. STORAGE HEALTH: Ensure the 2.8TB Blob Store is mounted and Writable
     # -------------------------------------------------------------------------
     - name: "[3/5] Verify Blob Store is Writable"
       ansible.builtin.uri:
@@ -52,9 +52,10 @@
         validate_certs: no
         method: GET
         status_code: 200
+      register: db_writable
 
     # -------------------------------------------------------------------------
-    # 4. Repository Check: Ensure repositories are Online
+    # 4. REPOSITORY STATUS: Ensure key repositories are Online
     # -------------------------------------------------------------------------
     - name: "[4/5] Ensure Repositories are ONLINE"
       ansible.builtin.uri:
@@ -69,7 +70,7 @@
       failed_when: "'online' not in repo_list.content"
 
     # -------------------------------------------------------------------------
-    # 5. Functional Test: Try to download an actual file
+    # 5. FUNCTIONAL TEST: End-to-End Download Verification
     # -------------------------------------------------------------------------
     - name: "[5/5] Perform Test Download of an Artifact"
       ansible.builtin.uri:
@@ -81,19 +82,20 @@
         method: GET
         status_code: 200
       register: download_test
+      # File is fetched into memory and discarded to verify readability without disk clutter
       ignore_errors: yes
 
     # -------------------------------------------------------------------------
-    # SUMMARY
+    # FINAL SUMMARY REPORT
     # -------------------------------------------------------------------------
-    - name: Display Validation Results
+    - name: Display Final Validation Summary
       ansible.builtin.debug:
         msg:
           - "========================================================="
           - "  NEXUS HA UPGRADE VALIDATION REPORT"
           - "========================================================="
           - "Node           : {{ inventory_hostname }}"
-          - "Port 8443 Status: UP"
+          - "HTTPS Port     : UP ({{ nexus_port }})"
           - "System Ready   : PASSED"
           - "Storage Write  : PASSED"
           - "Repo Online    : PASSED"
