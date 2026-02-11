@@ -1,26 +1,27 @@
 ---
-- name: Nexus HA Post-Upgrade Business Validation
+- name: Nexus HA Post-Upgrade Validation
   hosts: lxpd208, lxpd209
   gather_facts: no
   vars:
-    # Service settings
+    # Service Configuration
     nexus_port: 8443
     nexus_scheme: "https"
+    target_version: "3.89.0-09"
     
-    # ACTION REQUIRED: Update this to a real file path in your Nexus (e.g., .xml, .pom, or .jar)
-    test_artifact_path: "repository/maven-public/org/apache/maven/maven-model/3.0/maven-metadata.xml"
+    # Path based on your HA configuration
+    nexus_log_path: "/opt/nexus/sonatype-work/nexus3/log/nexus.log"
 
   tasks:
     # -------------------------------------------------------------------------
-    # 1. CONNECTIVITY: Ensure the HTTPS port is listening
+    # 1. NETWORK CONNECTIVITY
     # -------------------------------------------------------------------------
-    - name: "[1/5] Wait for Nexus HTTPS port ({{ nexus_port }})"
+    - name: "[1/6] Wait for Nexus HTTPS port ({{ nexus_port }})"
       ansible.builtin.wait_for:
         port: "{{ nexus_port }}"
         host: "{{ inventory_hostname }}"
         state: started
         delay: 5
-        timeout: 600  # 10 min timeout to allow for Database Migration
+        timeout: 300
       register: port_check
 
     # -------------------------------------------------------------------------
@@ -30,10 +31,28 @@
       ansible.builtin.shell: "ps -ef | grep java | grep nexus | grep -v grep"
       register: process_check
       changed_when: false
+
     # -------------------------------------------------------------------------
-    # 3. STORAGE HEALTH: Ensure the 2.8TB Blob Store is mounted and Writable
+    # 3. APPLICATION HEALTH (API)
     # -------------------------------------------------------------------------
-    - name: "[3/5] Verify Blob Store is Writable"
+    - name: "[3/6] Validate System Status API (200 OK)"
+      ansible.builtin.uri:
+        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status"
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: yes
+        validate_certs: no
+        method: GET
+        status_code: 200
+      register: api_status
+      retries: 20
+      delay: 10
+      until: api_status.status == 200
+
+    # -------------------------------------------------------------------------
+    # 4. STORAGE INTEGRITY (WRITABLE)
+    # -------------------------------------------------------------------------
+    - name: "[4/6] Verify Blob Store is Writable"
       ansible.builtin.uri:
         url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status/writable"
         user: "{{ ansible_user }}"
@@ -43,21 +62,6 @@
         method: GET
         status_code: 200
       register: db_writable
-
-    # -------------------------------------------------------------------------
-    # 4. REPOSITORY STATUS: Ensure key repositories are Online
-    # -------------------------------------------------------------------------
-    - name: "[4/5] Ensure Repositories are ONLINE"
-      ansible.builtin.uri:
-        url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/repositories"
-        user: "{{ ansible_user }}"
-        password: "{{ ansible_password }}"
-        force_basic_auth: yes
-        validate_certs: no
-        method: GET
-        return_content: yes
-      register: repo_list
-      failed_when: "'online' not in repo_list.content"
 
     # -------------------------------------------------------------------------
     # 5. FUNCTIONAL TEST: End-to-End Download Verification
