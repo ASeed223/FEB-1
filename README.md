@@ -3,17 +3,20 @@
   hosts: lxpd208, lxpd209
   gather_facts: no
   vars:
-    # Uses variables defined in your inventory
+    # Service Configuration
     nexus_port: 8443
     nexus_scheme: "https"
-    # Path based on your HA configuration
-    nexus_log: "/opt/nexus/sonatype-work/nexus3/log/nexus.log"
     target_version: "3.89.0-09"
+    
+    # Path based on your HA configuration
+    nexus_log_path: "/opt/nexus/sonatype-work/nexus3/log/nexus.log"
 
   tasks:
-    # 1. Connectivity Check
-    - name: Wait for Nexus HTTPS port ({{ nexus_port }})
-      wait_for:
+    # -------------------------------------------------------------------------
+    # 1. NETWORK CONNECTIVITY
+    # -------------------------------------------------------------------------
+    - name: "[1/6] Wait for Nexus HTTPS port ({{ nexus_port }})"
+      ansible.builtin.wait_for:
         port: "{{ nexus_port }}"
         host: "{{ inventory_hostname }}"
         state: started
@@ -21,18 +24,22 @@
         timeout: 300
       register: port_check
 
-    # 2. Process Check
-    - name: Verify Java process is running
-      shell: "ps -ef | grep java | grep nexus | grep -v grep"
+    # -------------------------------------------------------------------------
+    # 2. SYSTEM PROCESS CHECK
+    # -------------------------------------------------------------------------
+    - name: "[2/6] Verify Nexus Java process is active"
+      ansible.builtin.shell: "ps -ef | grep java | grep nexus | grep -v grep"
       register: process_check
       changed_when: false
 
-    # 3. Service Health Check (API)
-    - name: Validate API Health Status (200 OK)
-      uri:
+    # -------------------------------------------------------------------------
+    # 3. APPLICATION HEALTH (API)
+    # -------------------------------------------------------------------------
+    - name: "[3/6] Validate System Status API (200 OK)"
+      ansible.builtin.uri:
         url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status"
-        user: "{{ nexus_user }}"
-        password: "{{ nexus_password }}"
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
         force_basic_auth: yes
         validate_certs: no
         method: GET
@@ -42,43 +49,52 @@
       delay: 10
       until: api_status.status == 200
 
-    # 4. Storage Writable Check
-    - name: Verify Blob Store is Writable
-      uri:
+    # -------------------------------------------------------------------------
+    # 4. STORAGE INTEGRITY (WRITABLE)
+    # -------------------------------------------------------------------------
+    - name: "[4/6] Verify Blob Store is Writable"
+      ansible.builtin.uri:
         url: "{{ nexus_scheme }}://localhost:{{ nexus_port }}/service/rest/v1/status/writable"
-        user: "{{ nexus_user }}"
-        password: "{{ nexus_password }}"
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
         force_basic_auth: yes
         validate_certs: no
         method: GET
         status_code: 200
       register: db_writable
 
-    # 5. Log Verification
-    - name: Confirm version {{ target_version }} in logs
-      shell: "grep 'Started Sonatype Nexus .* {{ target_version }}' {{ nexus_log }} | tail -n 1"
+    # -------------------------------------------------------------------------
+    # 5. VERSION VERIFICATION (LOGS)
+    # -------------------------------------------------------------------------
+    - name: "[5/6] Confirm version {{ target_version }} in logs"
+      ansible.builtin.shell: "grep 'Started Sonatype Nexus .* {{ target_version }}' {{ nexus_log_path }} | tail -n 1"
       register: log_version_check
       failed_when: log_version_check.stdout == ""
       changed_when: false
 
-    # 6. Risk Assessment
-    - name: Scan last 100 lines for ERRORs
-      shell: "tail -n 100 {{ nexus_log }} | grep 'ERROR'"
+    # -------------------------------------------------------------------------
+    # 6. RISK ASSESSMENT
+    # -------------------------------------------------------------------------
+    - name: "[6/6] Scan last 100 lines for ERROR logs"
+      ansible.builtin.shell: "tail -n 100 {{ nexus_log_path }} | grep 'ERROR'"
       register: log_errors
       failed_when: false
       changed_when: false
 
-    # Final Summary Output
+    # -------------------------------------------------------------------------
+    # SUMMARY REPORT
+    # -------------------------------------------------------------------------
     - name: Display Validation Summary
-      debug:
+      ansible.builtin.debug:
         msg:
-          - "============================================="
-          - "Nexus Upgrade Validation: {{ 'SUCCESS' if log_version_check.rc == 0 else 'FAILED' }}"
-          - "============================================="
-          - "Node           : {{ inventory_hostname }}"
-          - "Port 8443      : UP"
-          - "API Status     : ONLINE"
-          - "Storage Mode   : READ/WRITE"
+          - "========================================================="
+          - "  NEXUS UPGRADE VALIDATION REPORT"
+          - "========================================================="
+          - "Target Host    : {{ inventory_hostname }}"
+          - "Target Version : {{ target_version }}"
+          - "HTTPS Port     : UP ({{ nexus_port }})"
+          - "API Health     : ONLINE (200 OK)"
+          - "Storage Mode   : READ/WRITE (PASSED)"
           - "Log Version    : VERIFIED"
-          - "Recent Errors  : {{ log_errors.stdout_lines | length }} found"
-          - "============================================="
+          - "Recent Errors  : {{ log_errors.stdout_lines | length }} errors found"
+          - "========================================================="
