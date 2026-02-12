@@ -1,1 +1,1 @@
-nexus /opt/appdata/nexus/nexus/bin/nexus run
+tail -f /opt/appdata/nexus/sonatype-work/nexus3/log/nexus.log
