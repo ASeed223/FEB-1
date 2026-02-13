@@ -1,1 +1,5 @@
-I added all the users above to the FTB_sip_dev_pull role in Nexus. I only added their regular FTB accounts instead of the E accounts, since most Nexus users are using their regular FTB accounts.
+Good morning everyone,
+Last Friday, I updated a few Ansible Vault entries related to the Nexus password change from last week. I also plan to add these additional steps to the Nexus password update wiki.
+Other than that, I granted Nexus access to a couple of Confluent team members.
+As for today, I plan to start creating another wiki that includes all the steps needed for a Nexus upgrade for future reference.
+That’s my plan for today.
