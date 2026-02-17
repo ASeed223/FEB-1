@@ -1,9 +1,1 @@
-{
-  "active": "encryption_key",
-  "keys": [
-    {
-      "id": "encryption_key",
-      "key": "123Qw#"
-    }
-  ]
-}
+nexus.secrets.file=/opt/nexus/sonatype-work/nexus3/etc/nexus.secrets.json
