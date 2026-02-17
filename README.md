@@ -1,15 +1,11 @@
-Encryption Key File Location
+Nexus Configuration Reference
 
-The Nexus custom encryption key is stored as a JSON file on each HA node.
+The encryption key file is referenced in:
 
-File Path
+/opt/nexus/sonatype-work/nexus3/etc/nexus.properties
 
-/opt/nexus/sonatype-work/nexus3/etc/nexus.secrets.json
+Property:
 
-Important Notes
+nexus.secrets.file=/opt/nexus/sonatype-work/nexus3/etc/nexus.secrets.json
 
-This file must exist on all Nexus HA nodes.
-
-The file content must be identical across nodes.
-
-Nexus reads this file during startup via nexus.properties.
+Do NOT change this path unless performing a coordinated maintenance change.
