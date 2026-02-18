@@ -1,3 +1,5 @@
-SSL Certificate Signing Request - ftbnexus (lxpd195)
+This guide focuses on setting up SSL for Apache (httpd) on servers like lxpd195 where automated service restarts are a must.
 
-Please sign the attached CSR for the ftbnexus application running on server lxpd195. We are updating the SSL certificate to resolve a service startup error caused by a password-protected private key, which will allow the Apache service to start automatically without manual intervention. This request includes Subject Alternative Names (SANs) for ftbnexus, ftbnexus.ftb.ca.gov, lxpd195, and lxpd195.ftb.ca.gov.
+The Problem: Standard SSL keys often use encryption (like -aes256), which forces Apache to stop and ask for a password every time it starts up. If you aren't there to type it in, the service stays down (Error: AH01969: Requesting pass phrase).
+
+The Fix: We use the -nodes (No DES) flag during generation. This creates an unencrypted private key, allowing Apache to read it instantly and boot up automatically without any manual intervention.
