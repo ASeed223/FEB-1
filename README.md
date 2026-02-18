@@ -1,26 +1,14 @@
-Create the config file (san.cnf):
-Modern browsers require Subject Alternative Names (SANs).
-[ req ]
-prompt = no
-default_bits = 4096
-distinguished_name = dn
-req_extensions = req_ext
+Step 2: Generate the Password-Less Key & CSR
+This is the most critical step for Apache automation. We use the -nodes flag to ensure the private key is not encrypted.
 
-[ dn ]
-C = US
-ST = CA
-L = Sacramento
-O = StateOfCalifornia
-OU = FranchiseTaxBoard
-CN = ftbnexus.ftb.ca.gov   # Main FQDN
-emailAddress = FTBEDRCMTeam@ftb.ca.gov
+Run this command inside /home/cmdeploy/2026Cert:
+openssl req -new -newkey rsa:4096 -nodes \
+  -keyout ftbnexus.key \
+  -out ftbnexus.csr \
+  -config san.cnf
 
-[ req_ext ]
-subjectAltName = @alt_names
+  You now have two files:
 
-[alt_names]
-# Add all aliases here
-DNS.1 = ftbnexus
-DNS.2 = ftbnexus.ftb.ca.gov
-DNS.3 = lxpd195
-DNS.4 = lxpd195.ftb.ca.gov
+ftbnexus.key: The Private Key (No password). Keep this safe on the server.
+
+ftbnexus.csr: The Request File (Send this to WSMG).
