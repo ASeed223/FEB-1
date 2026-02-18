@@ -1,14 +1,8 @@
-Step 2: Generate the Password-Less Key & CSR
-This is the most critical step for Apache automation. We use the -nodes flag to ensure the private key is not encrypted.
+Step 3: Verify CSR Locally (Safety First)
+Do not paste the CSR into online decoders. Verify it directly on the server to check if the SANs (aliases) are correct.
 
-Run this command inside /home/cmdeploy/2026Cert:
-openssl req -new -newkey rsa:4096 -nodes \
-  -keyout ftbnexus.key \
-  -out ftbnexus.csr \
-  -config san.cnf
 
-  You now have two files:
+openssl req -text -noout -verify -in ftbnexus.csr
 
-ftbnexus.key: The Private Key (No password). Keep this safe on the server.
 
-ftbnexus.csr: The Request File (Send this to WSMG).
+Check the output for X509v3 Subject Alternative Name and ensure lxpd195 and ftbnexus are listed.
