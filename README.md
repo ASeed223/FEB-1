@@ -1,8 +1,5 @@
-Step 3: Verify CSR Locally (Safety First)
-Do not paste the CSR into online decoders. Verify it directly on the server to check if the SANs (aliases) are correct.
+Good morning everyone,
 
+Yesterday after the morning meeting, I finished the wiki documentation on managing the secret encryption key in Nexus. I also created an additional task to set up the encryption key for the upcoming Nexus upgrade next Friday. Other than that, I helped upload nine Pega ZIP files to dev3 and tst3 before logging off.
 
-openssl req -text -noout -verify -in ftbnexus.csr
-
-
-Check the output for X509v3 Subject Alternative Name and ensure lxpd195 and ftbnexus are listed.
+As for today, I have several meetings to attend, and I will focus on the onlinehelp deployment later this afternoon.
