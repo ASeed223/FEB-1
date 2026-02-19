@@ -1,1 +1,1 @@
-Important Note: FreshService does not support .csr file uploads. To bypass this, simply save your CSR content as a .txt file (e.g., ftbnexus.csr.txt) before attaching it to your ticket. This changes the extension but keeps the data intact for WSMG to process.
+Submit a General Service Request in FreshService and attach your ftbnexus.csr.txt file. Be sure to specify that the issued certificate must be provided in PEM format"
