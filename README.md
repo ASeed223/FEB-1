@@ -8,7 +8,11 @@
     "writePolicy": "ALLOW",
     "latestPolicy": false
   },
-  "cleanup": null,
+  "cleanup": {
+    "policyNames": [
+      "Docker_365_Days_Policy"
+    ]
+  },
   "docker": {
     "v1Enabled": true,
     "forceBasicAuth": true,
