@@ -14,7 +14,11 @@ REPO_NAME = "SIP_Development"
 DAYS_OLD = 365
 KEEP_VERSIONS = 10
 
-CSV_REPORT_FILE = "ultimate_cleanup_candidates.csv"
+BASE_DIR = r"C:\Users\C4387\Desktop\nexus_cleanup"
+if not os.path.exists(BASE_DIR):
+    os.makedirs(BASE_DIR)
+
+CSV_REPORT_FILE = os.path.join(BASE_DIR, "ultimate_cleanup_candidates.csv")
 
 VERIFY_SSL = False
 TIMEOUT_SECONDS = 30
@@ -27,10 +31,6 @@ def parse_nexus_iso(dt_str):
         return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 
     s = dt_str.strip()
-
-    # Handle: 2025-01-02T03:04:05.678Z
-    # Handle: 2025-01-02T03:04:05Z
-    # Handle: 2025-01-02T03:04:05.678+00:00 (rare)
     try:
         base = s[:19]  # YYYY-MM-DDTHH:MM:SS
         dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
@@ -39,16 +39,35 @@ def parse_nexus_iso(dt_str):
         return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 
 
-def get_asset_last_active_dt(asset):
-    dt_str = asset.get("lastDownloaded") or asset.get("lastModified")
-    return parse_nexus_iso(dt_str)
-
-
-def get_component_last_active_dt(component):
+def analyze_component(component):
     assets = component.get("assets") or []
     if not assets:
-        return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-    return max(get_asset_last_active_dt(a) for a in assets)
+        epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+        return epoch, epoch, 0
+
+    publish_dates = []
+    used_dates = []
+    total_bytes = 0
+
+    for a in assets:
+        size = a.get("fileSize") or 0
+        if not isinstance(size, int):
+            try:
+                size = int(size)
+            except Exception:
+                size = 0
+        total_bytes += size
+
+        p_dt = parse_nexus_iso(a.get("lastModified"))
+        publish_dates.append(p_dt)
+
+        d_str = a.get("lastDownloaded")
+        if d_str:
+            used_dates.append(parse_nexus_iso(d_str))
+        else:
+            used_dates.append(p_dt)
+
+    return max(publish_dates), max(used_dates), total_bytes
 
 
 def fetch_all_components(session):
@@ -75,8 +94,9 @@ def fetch_all_components(session):
     return components
 
 
-def run_cleanup_dryrun():
+def run_rigorous_scan():
     print("Starting scan")
+    print(f"OutputDir: {BASE_DIR}")
     print(f"Repository: {REPO_NAME}")
     print(f"DaysOld: {DAYS_OLD}")
     print(f"KeepVersions: {KEEP_VERSIONS}")
@@ -91,8 +111,6 @@ def run_cleanup_dryrun():
         print(f"Fetch error: {e}")
         return
 
-    print(f"Total components: {len(components)}")
-
     grouped = defaultdict(list)
     for comp in components:
         name = comp.get("name")
@@ -102,27 +120,38 @@ def run_cleanup_dryrun():
     cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=DAYS_OLD)
 
     candidates = []
+    total_freed_bytes = 0
 
     for name, versions in grouped.items():
         for comp in versions:
-            comp["_last_active_dt"] = get_component_last_active_dt(comp)
+            p_dt, u_dt, size = analyze_component(comp)
+            comp["_publish_dt"] = p_dt
+            comp["_used_dt"] = u_dt
+            comp["_size"] = size
 
-        versions.sort(key=lambda x: x["_last_active_dt"], reverse=True)
+        versions.sort(key=lambda x: x["_publish_dt"], reverse=True)
 
         for comp in versions[KEEP_VERSIONS:]:
-            last_active = comp["_last_active_dt"]
-            if last_active < cutoff_dt:
+            if comp["_used_dt"] < cutoff_dt:
+                total_freed_bytes += comp["_size"]
                 candidates.append(
                     {
                         "Name": name,
                         "Version": comp.get("version", ""),
                         "Component ID": comp.get("id", ""),
-                        "Last Active Date": last_active.isoformat(),
-                        "Reason": f"Older than {DAYS_OLD} days and not in top {KEEP_VERSIONS}",
+                        "Publish Date": comp["_publish_dt"].strftime("%Y-%m-%d"),
+                        "Last Downloaded": comp["_used_dt"].strftime("%Y-%m-%d"),
+                        "Size (MB)": round(comp["_size"] / (1024 * 1024), 2),
+                        "Reason": f"Outside top {KEEP_VERSIONS} and last used before {cutoff_dt.strftime('%Y-%m-%d')}",
                     }
                 )
 
+    total_gb = total_freed_bytes / (1024 * 1024 * 1024)
+
+    print("Report")
+    print(f"ScannedComponents: {len(components)}")
     print(f"Candidates: {len(candidates)}")
+    print(f"EstimatedMaxFreedGB: {total_gb:.2f}")
 
     if not candidates:
         print("No candidates found")
@@ -130,7 +159,15 @@ def run_cleanup_dryrun():
 
     try:
         with open(CSV_REPORT_FILE, mode="w", encoding="utf-8-sig", newline="") as f:
-            fieldnames = ["Name", "Version", "Component ID", "Last Active Date", "Reason"]
+            fieldnames = [
+                "Name",
+                "Version",
+                "Component ID",
+                "Publish Date",
+                "Last Downloaded",
+                "Size (MB)",
+                "Reason",
+            ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(candidates)
@@ -142,4 +179,4 @@ def run_cleanup_dryrun():
 
 
 if __name__ == "__main__":
-    run_cleanup_dryrun()
+    run_rigorous_scan()
