@@ -1,1 +1,1 @@
-pip install requests --trusted-host pypi.org --trusted-host files.pythonhosted.org
+pip install requests --user --trusted-host pypi.org --trusted-host files.pythonhosted.org
