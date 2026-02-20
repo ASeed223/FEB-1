@@ -1,19 +1,73 @@
 import csv
 import os
+import time
+import requests
 
-CSV_FILE = "cleanup_list.csv"
+# Configuration
+NEXUS_URL = "https://lxpd208:8443"
+USERNAME = "nexus"
+PASSWORD = os.getenv("NEXUS_PASSWORD", "your_password_here")
+REPO_NAME = "SIP_Development"
+CSV_FILE = r"C:\Users\C4387\Desktop\nexus_cleanup\docker.csv"
+
+# Request settings
+VERIFY_SSL = False
+TIMEOUT_SECONDS = 30
+SLEEP_BETWEEN_DELETES_SECONDS = 0.2
+
+requests.packages.urllib3.disable_warnings()
 
 
-def analyze_csv():
+def find_component_ids(session: requests.Session, name: str, version: str) -> list[str]:
+    url = f"{NEXUS_URL}/service/rest/v1/search"
+    params = {
+        "repository": REPO_NAME,
+        "name": name,
+        "version": version,
+    }
+
+    r = session.get(url, params=params, timeout=TIMEOUT_SECONDS)
+    if r.status_code != 200:
+        raise RuntimeError(f"Search failed for {name}:{version} status={r.status_code} body={r.text}")
+
+    data = r.json()
+    items = data.get("items") or []
+
+    ids = []
+    for item in items:
+        item_name = item.get("name")
+        item_version = item.get("version")
+        item_id = item.get("id")
+        if item_id and item_name == name and item_version == version:
+            ids.append(item_id)
+
+    return ids
+
+
+def delete_component(session: requests.Session, comp_id: str) -> bool:
+    url = f"{NEXUS_URL}/service/rest/v1/components/{comp_id}"
+    r = session.delete(url, timeout=TIMEOUT_SECONDS)
+    return r.status_code == 204
+
+
+def start_deletion():
     if not os.path.exists(CSV_FILE):
         print(f"File not found: {CSV_FILE}")
-        print("Make sure the CSV file is in the same folder as this script")
+        print("Make sure the CSV file path is correct")
         return
 
-    total_bytes = 0
-    item_count = 0
+    success_count = 0
+    fail_count = 0
+    skip_count = 0
 
-    print(f"Reading: {CSV_FILE}")
+    print("Starting deletion job")
+    print(f"NexusURL: {NEXUS_URL}")
+    print(f"Repository: {REPO_NAME}")
+    print(f"CSV: {CSV_FILE}")
+
+    session = requests.Session()
+    session.auth = (USERNAME, PASSWORD)
+    session.verify = VERIFY_SSL
 
     try:
         with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as file:
@@ -22,36 +76,58 @@ def analyze_csv():
             for row in reader:
                 name = (row.get("Name") or "").strip()
                 version = (row.get("Version") or "").strip()
-                size_str = (row.get("Asset Size") or "0").strip()
 
                 if not name:
                     continue
 
+                if not version:
+                    print(f"Skipping item with missing Version: {name}")
+                    skip_count += 1
+                    continue
+
                 try:
-                    size = int(size_str)
-                except ValueError:
-                    size = 0
+                    comp_ids = find_component_ids(session, name, version)
+                except Exception as e:
+                    print(f"Search error for {name}:{version} error={e}")
+                    fail_count += 1
+                    continue
 
-                total_bytes += size
-                item_count += 1
+                if not comp_ids:
+                    print(f"Not found: {name}:{version}")
+                    skip_count += 1
+                    continue
 
-                if item_count <= 10:
-                    print(f"Item: {name}  Version: {version}  SizeBytes: {size}")
-                elif item_count == 11:
-                    print("...")
+                deleted_any = False
+                for comp_id in comp_ids:
+                    ok = False
+                    try:
+                        ok = delete_component(session, comp_id)
+                    except Exception as e:
+                        print(f"Delete error for {name}:{version} id={comp_id} error={e}")
+                        ok = False
 
-        total_mb = total_bytes / (1024 * 1024)
-        total_gb = total_bytes / (1024 * 1024 * 1024)
+                    if ok:
+                        deleted_any = True
+                        success_count += 1
+                        print(f"Deleted: {name}:{version} id={comp_id}")
+                    else:
+                        fail_count += 1
+                        print(f"Delete failed: {name}:{version} id={comp_id}")
 
-        print("Report")
-        print(f"Items: {item_count}")
-        print(f"TotalBytes: {total_bytes}")
-        print(f"TotalMB: {total_mb:.4f}")
-        print(f"TotalGB: {total_gb:.6f}")
+                    time.sleep(SLEEP_BETWEEN_DELETES_SECONDS)
+
+                if not deleted_any:
+                    print(f"No deletions completed for: {name}:{version}")
 
     except Exception as e:
-        print(f"Read error: {e}")
+        print(f"Fatal error: {e}")
+
+    print("Job finished")
+    print(f"Deleted: {success_count}")
+    print(f"Failed: {fail_count}")
+    print(f"Skipped: {skip_count}")
+    print("Run the appropriate cleanup task in Nexus if you need to reclaim disk space")
 
 
 if __name__ == "__main__":
-    analyze_csv()
+    start_deletion()
