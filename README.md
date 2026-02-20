@@ -2,8 +2,8 @@ import requests
 
 # ============== Update these values ==============
 NEXUS_URL = "https://lxpd208:8443"
-USERNAME = "admin"
-PASSWORD = "your_admin_password"
+USERNAME = "nexus"
+PASSWORD = "1234?231245!leHFuywjW"
 # =================================================
 
 REPO_NAME = "SIP_Development"
@@ -52,3 +52,13 @@ def test_connection():
 
 if __name__ == "__main__":
     test_connection()
+
+
+    Traceback (most recent call last):
+  File "c:/Users/C4387/Desktop/nexus_cleaner.py", line 1, in <module>
+    import requests
+  File "C:\Users\C4387\AppData\Roaming\Python\Python37\site-packages\requests\__init__.py", line 43, in <module>
+    import urllib3
+  File "C:\Users\C4387\AppData\Roaming\Python\Python37\site-packages\urllib3\__init__.py", line 42, in <module>
+    "urllib3 v2.0 only supports OpenSSL 1.1.1+, currently "
+ImportError: urllib3 v2.0 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'OpenSSL 1.1.0j  20 Nov 2018'. See: https://github.com/urllib3/urllib3/issues/2168
