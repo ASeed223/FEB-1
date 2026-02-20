@@ -1,7 +1,57 @@
-Namespace	Name	Version	Path	Blob Store Name	Asset Size	Downloaded Date ISO-8601	Published Date ISO-8601
-	alts/admin-service-rest-app	22085	/v2/alts/admin-service-rest-app/manifests/22085	Docker	762	2024-10-11T19:09:08.101Z	2024-09-11T22:55:23.447Z
-	alts/admin-service-rest-app	sha256-48c37db5fcb985eb23cde266310fcc77c49a6a0634f410c07de08cfe476e23d8.sig	/v2/alts/admin-service-rest-app/manifests/sha256-48c37db5fcb985eb23cde266310fcc77c49a6a0634f410c07de08cfe476e23d8.sig	Docker	558		2024-09-11T21:59:48.293Z
-	alts/admin-service-rest-app	22082	/v2/alts/admin-service-rest-app/manifests/22082	Docker	762	2024-09-11T21:59:48.233Z	2024-09-11T21:58:27.720Z
-	alts/admin-service-rest-app	sha256-82c33fe21c92c46ee18be8fa4122c338c053eab0ed36c2d736c5c7c23f9e07cb.sig	/v2/alts/admin-service-rest-app/manifests/sha256-82c33fe21c92c46ee18be8fa4122c338c053eab0ed36c2d736c5c7c23f9e07cb.sig	Docker	558	2024-09-04T17:29:57.592Z	2024-04-03T16:37:37.420Z
-	alts/admin-service-rest-app	21960	/v2/alts/admin-service-rest-app/manifests/21960	Docker	762	2024-09-04T17:29:57.580Z	2024-09-04T17:29:43.111Z
-<img width="2151" height="121" alt="image" src="https://github.com/user-attachments/assets/58069100-8492-49ef-b169-a7cfce7e0a4a" />
+import csv
+import os
+
+CSV_FILE = "cleanup_list.csv"
+
+
+def analyze_csv():
+    if not os.path.exists(CSV_FILE):
+        print(f"File not found: {CSV_FILE}")
+        print("Make sure the CSV file is in the same folder as this script")
+        return
+
+    total_bytes = 0
+    item_count = 0
+
+    print(f"Reading: {CSV_FILE}")
+
+    try:
+        with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+
+            for row in reader:
+                name = (row.get("Name") or "").strip()
+                version = (row.get("Version") or "").strip()
+                size_str = (row.get("Asset Size") or "0").strip()
+
+                if not name:
+                    continue
+
+                try:
+                    size = int(size_str)
+                except ValueError:
+                    size = 0
+
+                total_bytes += size
+                item_count += 1
+
+                if item_count <= 10:
+                    print(f"Item: {name}  Version: {version}  SizeBytes: {size}")
+                elif item_count == 11:
+                    print("...")
+
+        total_mb = total_bytes / (1024 * 1024)
+        total_gb = total_bytes / (1024 * 1024 * 1024)
+
+        print("Report")
+        print(f"Items: {item_count}")
+        print(f"TotalBytes: {total_bytes}")
+        print(f"TotalMB: {total_mb:.4f}")
+        print(f"TotalGB: {total_gb:.6f}")
+
+    except Exception as e:
+        print(f"Read error: {e}")
+
+
+if __name__ == "__main__":
+    analyze_csv()
