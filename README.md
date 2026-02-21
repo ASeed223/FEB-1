@@ -1,1 +1,1 @@
-du -sh /opt/appdata/nexus/sonatype-work
+fstrim -v /opt/appdata/nexus/sonatype-work
