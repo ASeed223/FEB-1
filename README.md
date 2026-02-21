@@ -1,182 +1,117 @@
 import csv
-import datetime
 import os
-from collections import defaultdict
-
+import time
+import datetime
 import requests
 
 # Configuration
 NEXUS_URL = "https://lxpd208:8443"
 USERNAME = "nexus"
 PASSWORD = os.getenv("NEXUS_PASSWORD", "your_password_here")
-REPO_NAME = "SIP_Development"
 
-DAYS_OLD = 365
-KEEP_VERSIONS = 10
-
-BASE_DIR = r"C:\Users\C4387\Desktop\nexus_cleanup"
-if not os.path.exists(BASE_DIR):
-    os.makedirs(BASE_DIR)
-
-CSV_REPORT_FILE = os.path.join(BASE_DIR, "ultimate_cleanup_candidates.csv")
+CSV_FILE = "ultimate_cleanup_candidates.csv"
 
 VERIFY_SSL = False
 TIMEOUT_SECONDS = 30
+SLEEP_SECONDS = 0.05
+
+DRY_RUN = False  # Set True to test without deleting
+
+REPORT_FILE = "mass_deletion_report.txt"
 
 requests.packages.urllib3.disable_warnings()
 
 
-def parse_nexus_iso(dt_str):
-    if not dt_str:
-        return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+def execute_mass_deletion():
+    if not os.path.exists(CSV_FILE):
+        print(f"File not found: {CSV_FILE}")
+        return
 
-    s = dt_str.strip()
-    try:
-        base = s[:19]  # YYYY-MM-DDTHH:MM:SS
-        dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
-        return dt.replace(tzinfo=datetime.timezone.utc)
-    except Exception:
-        return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    start_time = datetime.datetime.now()
 
+    success_count = 0
+    fail_count = 0
+    skip_count = 0
 
-def analyze_component(component):
-    assets = component.get("assets") or []
-    if not assets:
-        epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-        return epoch, epoch, 0
+    with open(REPORT_FILE, mode="w", encoding="utf-8") as log_file:
 
-    publish_dates = []
-    used_dates = []
-    total_bytes = 0
+        def log(msg: str) -> None:
+            print(msg)
+            log_file.write(msg + "\n")
 
-    for a in assets:
-        size = a.get("fileSize") or 0
-        if not isinstance(size, int):
+        log("Mass deletion job started")
+        log(f"StartTime: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log(f"NexusURL: {NEXUS_URL}")
+        log(f"CSVFile: {CSV_FILE}")
+        log(f"DryRun: {DRY_RUN}")
+        log("")
+
+        session = requests.Session()
+        session.auth = (USERNAME, PASSWORD)
+        session.verify = VERIFY_SSL
+
+        with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            rows = list(reader)
+
+        total_items = len(rows)
+        log(f"TotalRows: {total_items}")
+        log("")
+
+        for index, row in enumerate(rows, 1):
+            comp_id = (row.get("Component ID") or "").strip()
+            name = (row.get("Name") or "").strip()
+            version = (row.get("Version") or "").strip()
+
+            if not comp_id:
+                log(f"{index}/{total_items} SKIP MissingComponentId name={name} version={version}")
+                skip_count += 1
+                continue
+
+            del_url = f"{NEXUS_URL}/service/rest/v1/components/{comp_id}"
+
+            if DRY_RUN:
+                log(f"{index}/{total_items} DRYRUN Delete name={name} version={version} id={comp_id}")
+                time.sleep(SLEEP_SECONDS)
+                continue
+
             try:
-                size = int(size)
-            except Exception:
-                size = 0
-        total_bytes += size
+                r = session.delete(del_url, timeout=TIMEOUT_SECONDS)
+            except Exception as e:
+                log(f"{index}/{total_items} FAIL DeleteRequest name={name} version={version} id={comp_id} error={e}")
+                fail_count += 1
+                time.sleep(SLEEP_SECONDS)
+                continue
 
-        p_dt = parse_nexus_iso(a.get("lastModified"))
-        publish_dates.append(p_dt)
+            if r.status_code == 204:
+                log(f"{index}/{total_items} OK Deleted name={name} version={version} id={comp_id}")
+                success_count += 1
+            elif r.status_code == 404:
+                log(f"{index}/{total_items} SKIP NotFound name={name} version={version} id={comp_id}")
+                skip_count += 1
+            elif r.status_code == 401:
+                log(f"{index}/{total_items} FAIL Unauthorized name={name} version={version} id={comp_id}")
+                fail_count += 1
+            else:
+                log(f"{index}/{total_items} FAIL DeleteStatus name={name} version={version} id={comp_id} status={r.status_code} body={r.text}")
+                fail_count += 1
 
-        d_str = a.get("lastDownloaded")
-        if d_str:
-            used_dates.append(parse_nexus_iso(d_str))
-        else:
-            used_dates.append(p_dt)
+            time.sleep(SLEEP_SECONDS)
 
-    return max(publish_dates), max(used_dates), total_bytes
+        end_time = datetime.datetime.now()
 
+        log("")
+        log("Job summary")
+        log(f"EndTime: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log(f"Deleted: {success_count}")
+        log(f"Failed: {fail_count}")
+        log(f"Skipped: {skip_count}")
+        log("")
+        log("Next steps")
+        log("Run repository cleanup and blob store compaction tasks in Nexus to reclaim disk space")
 
-def fetch_all_components(session):
-    components = []
-    url = f"{NEXUS_URL}/service/rest/v1/components"
-    params = {"repository": REPO_NAME}
-
-    while True:
-        r = session.get(url, params=params, timeout=TIMEOUT_SECONDS, verify=VERIFY_SSL)
-        if r.status_code != 200:
-            raise RuntimeError(f"Fetch failed status={r.status_code} body={r.text}")
-
-        data = r.json() or {}
-        items = data.get("items") or []
-        components.extend(items)
-
-        token = data.get("continuationToken")
-        if not token:
-            break
-
-        params = {"repository": REPO_NAME, "continuationToken": token}
-        print(f"Fetched {len(components)} components")
-
-    return components
-
-
-def run_rigorous_scan():
-    print("Starting scan")
-    print(f"OutputDir: {BASE_DIR}")
-    print(f"Repository: {REPO_NAME}")
-    print(f"DaysOld: {DAYS_OLD}")
-    print(f"KeepVersions: {KEEP_VERSIONS}")
-
-    session = requests.Session()
-    session.auth = (USERNAME, PASSWORD)
-    session.verify = VERIFY_SSL
-
-    try:
-        components = fetch_all_components(session)
-    except Exception as e:
-        print(f"Fetch error: {e}")
-        return
-
-    grouped = defaultdict(list)
-    for comp in components:
-        name = comp.get("name")
-        if name:
-            grouped[name].append(comp)
-
-    cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=DAYS_OLD)
-
-    candidates = []
-    total_freed_bytes = 0
-
-    for name, versions in grouped.items():
-        for comp in versions:
-            p_dt, u_dt, size = analyze_component(comp)
-            comp["_publish_dt"] = p_dt
-            comp["_used_dt"] = u_dt
-            comp["_size"] = size
-
-        versions.sort(key=lambda x: x["_publish_dt"], reverse=True)
-
-        for comp in versions[KEEP_VERSIONS:]:
-            if comp["_used_dt"] < cutoff_dt:
-                total_freed_bytes += comp["_size"]
-                candidates.append(
-                    {
-                        "Name": name,
-                        "Version": comp.get("version", ""),
-                        "Component ID": comp.get("id", ""),
-                        "Publish Date": comp["_publish_dt"].strftime("%Y-%m-%d"),
-                        "Last Downloaded": comp["_used_dt"].strftime("%Y-%m-%d"),
-                        "Size (MB)": round(comp["_size"] / (1024 * 1024), 2),
-                        "Reason": f"Outside top {KEEP_VERSIONS} and last used before {cutoff_dt.strftime('%Y-%m-%d')}",
-                    }
-                )
-
-    total_gb = total_freed_bytes / (1024 * 1024 * 1024)
-
-    print("Report")
-    print(f"ScannedComponents: {len(components)}")
-    print(f"Candidates: {len(candidates)}")
-    print(f"EstimatedMaxFreedGB: {total_gb:.2f}")
-
-    if not candidates:
-        print("No candidates found")
-        return
-
-    try:
-        with open(CSV_REPORT_FILE, mode="w", encoding="utf-8-sig", newline="") as f:
-            fieldnames = [
-                "Name",
-                "Version",
-                "Component ID",
-                "Publish Date",
-                "Last Downloaded",
-                "Size (MB)",
-                "Reason",
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(candidates)
-
-        print(f"Report written: {CSV_REPORT_FILE}")
-
-    except Exception as e:
-        print(f"CSV write error: {e}")
+    print(f"Report written to: {REPORT_FILE}")
 
 
 if __name__ == "__main__":
-    run_rigorous_scan()
+    execute_mass_deletion()
