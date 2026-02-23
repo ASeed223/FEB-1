@@ -7,22 +7,40 @@ import requests
 # Configuration
 NEXUS_URL = "https://lxpd195:8444"
 USERNAME = "nexus"
-PASSWORD = "cs12312314!leHFuywjW"
-CSV_FILE = r"C:\Users\C4387\Desktop\nexus_cleanup\ultimate_cleanup_candidates.csv"
+PASSWORD = os.getenv("NEXUS_PASSWORD", "your_password_here")
+
+CSV_FILE = r"C:\Users\C4387\Desktop\nexus_cleanup\cleanup_candidates_lxpd195_SIP_Development_DeepScan.csv"
+
 VERIFY_SSL = False
 TIMEOUT_SECONDS = 30
 SLEEP_SECONDS = 0.05
 
-DRY_RUN = False  # Set True to test without deleting
+DRY_RUN = True
 
-REPORT_FILE = "mass_deletion_report.txt"
+BASE_DIR = r"C:\Users\C4387\Desktop\nexus_cleanup"
+os.makedirs(BASE_DIR, exist_ok=True)
+
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+REPORT_FILE = os.path.join(BASE_DIR, f"deletion_audit_{timestamp}.txt")
 
 requests.packages.urllib3.disable_warnings()
 
 
+def safe_float(v, default=0.0):
+    try:
+        if v is None:
+            return default
+        s = str(v).strip()
+        if not s:
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+
 def execute_mass_deletion():
     if not os.path.exists(CSV_FILE):
-        print(f"File not found: {CSV_FILE}")
+        print(f"CSV file not found: {CSV_FILE}")
         return
 
     start_time = datetime.datetime.now()
@@ -30,26 +48,30 @@ def execute_mass_deletion():
     success_count = 0
     fail_count = 0
     skip_count = 0
+    deleted_mb = 0.0
 
     with open(REPORT_FILE, mode="w", encoding="utf-8") as log_file:
 
-        def log(msg: str) -> None:
+        def log(msg):
             print(msg)
             log_file.write(msg + "\n")
 
-        log("Mass deletion job started")
+        log("=" * 70)
+        log("Nexus Mass Deletion Audit")
+        log("=" * 70)
         log(f"StartTime: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         log(f"NexusURL: {NEXUS_URL}")
         log(f"CSVFile: {CSV_FILE}")
         log(f"DryRun: {DRY_RUN}")
+        log("=" * 70)
         log("")
 
         session = requests.Session()
         session.auth = (USERNAME, PASSWORD)
         session.verify = VERIFY_SSL
 
-        with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as file:
-            reader = csv.DictReader(file)
+        with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
             rows = list(reader)
 
         total_items = len(rows)
@@ -60,6 +82,7 @@ def execute_mass_deletion():
             comp_id = (row.get("Component ID") or "").strip()
             name = (row.get("Name") or "").strip()
             version = (row.get("Version") or "").strip()
+            size_mb = safe_float(row.get("Size (MB)"), 0.0)
 
             if not comp_id:
                 log(f"{index}/{total_items} SKIP MissingComponentId name={name} version={version}")
@@ -69,7 +92,7 @@ def execute_mass_deletion():
             del_url = f"{NEXUS_URL}/service/rest/v1/components/{comp_id}"
 
             if DRY_RUN:
-                log(f"{index}/{total_items} DRYRUN Delete name={name} version={version} id={comp_id}")
+                log(f"{index}/{total_items} DRYRUN Delete name={name} version={version} sizeMB={size_mb:.2f} id={comp_id}")
                 time.sleep(SLEEP_SECONDS)
                 continue
 
@@ -82,8 +105,9 @@ def execute_mass_deletion():
                 continue
 
             if r.status_code == 204:
-                log(f"{index}/{total_items} OK Deleted name={name} version={version} id={comp_id}")
+                log(f"{index}/{total_items} OK Deleted name={name} version={version} sizeMB={size_mb:.2f} id={comp_id}")
                 success_count += 1
+                deleted_mb += size_mb
             elif r.status_code == 404:
                 log(f"{index}/{total_items} SKIP NotFound name={name} version={version} id={comp_id}")
                 skip_count += 1
@@ -97,18 +121,28 @@ def execute_mass_deletion():
             time.sleep(SLEEP_SECONDS)
 
         end_time = datetime.datetime.now()
+        duration = end_time - start_time
+        deleted_gb = deleted_mb / 1024.0
 
         log("")
-        log("Job summary")
+        log("=" * 70)
+        log("Summary")
+        log("=" * 70)
         log(f"EndTime: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log(f"Duration: {duration}")
         log(f"Deleted: {success_count}")
         log(f"Failed: {fail_count}")
         log(f"Skipped: {skip_count}")
-        log("")
-        log("Next steps")
-        log("Run repository cleanup and blob store compaction tasks in Nexus to reclaim disk space")
+        if not DRY_RUN:
+            log(f"DeletedSizeGB: {deleted_gb:.2f}")
+        log("=" * 70)
 
-    print(f"Report written to: {REPORT_FILE}")
+        if not DRY_RUN:
+            log("")
+            log("NextSteps")
+            log("Run blob store compaction in Nexus to reclaim disk space")
+
+    print(f"Audit report written to: {REPORT_FILE}")
 
 
 if __name__ == "__main__":
