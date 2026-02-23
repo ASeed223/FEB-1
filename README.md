@@ -1,5 +1,7 @@
 import csv
 import os
+import time
+import datetime
 import requests
 
 # Configuration
@@ -7,87 +9,116 @@ NEXUS_URL = "https://lxpd195:8444"
 USERNAME = "nexus"
 PASSWORD = os.getenv("NEXUS_PASSWORD", "your_password_here")
 
-CSV_FILE = r"C:\Users\C4387\Desktop\nexus_cleanup\cleanup_candidates_lxpd195_SIP_Development.csv"
+CSV_FILE = r"C:\Users\C4387\Desktop\nexus_cleanup\ultimate_cleanup_candidates.csv"
 
 VERIFY_SSL = False
-TIMEOUT_SECONDS = 10
-PRINT_EVERY = 50
+TIMEOUT_SECONDS = 30
+SLEEP_SECONDS = 0.05
+
+DRY_RUN = False  # Set True to test without deleting
 
 requests.packages.urllib3.disable_warnings()
 
 
-def check_component_existence():
+def execute_mass_deletion():
     if not os.path.exists(CSV_FILE):
         print(f"File not found: {CSV_FILE}")
         return
 
-    exists_count = 0
-    not_found_count = 0
-    error_count = 0
+    base_dir = os.path.dirname(CSV_FILE) or "."
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_file = os.path.join(base_dir, f"mass_deletion_report_{ts}.txt")
+
+    start_time = datetime.datetime.now()
+
+    success_count = 0
+    fail_count = 0
     skip_count = 0
 
-    session = requests.Session()
-    session.auth = (USERNAME, PASSWORD)
-    session.verify = VERIFY_SSL
+    with open(report_file, mode="w", encoding="utf-8") as log_file:
 
-    print("Starting component existence check")
-    print(f"NexusURL: {NEXUS_URL}")
-    print(f"CSVFile: {CSV_FILE}")
+        def log(msg: str) -> None:
+            print(msg)
+            log_file.write(msg + "\n")
 
-    with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+        log("Mass deletion job started")
+        log(f"StartTime: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log(f"NexusURL: {NEXUS_URL}")
+        log(f"CSVFile: {CSV_FILE}")
+        log(f"DryRun: {DRY_RUN}")
+        log("")
 
-    total = len(rows)
-    print(f"TotalRows: {total}")
+        session = requests.Session()
+        session.auth = (USERNAME, PASSWORD)
+        session.verify = VERIFY_SSL
 
-    for i, row in enumerate(rows, 1):
-        comp_id = (row.get("Component ID") or "").strip()
-        name = (row.get("Name") or "").strip()
-        version = (row.get("Version") or "").strip()
+        with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            rows = list(reader)
 
-        if not comp_id:
-            skip_count += 1
-            continue
+        total_items = len(rows)
+        log(f"TotalRows: {total_items}")
+        log("")
 
-        url = f"{NEXUS_URL}/service/rest/v1/components/{comp_id}"
+        for index, row in enumerate(rows, 1):
+            comp_id = (row.get("Component ID") or "").strip()
+            name = (row.get("Name") or "").strip()
+            version = (row.get("Version") or "").strip()
 
-        try:
-            r = session.get(url, timeout=TIMEOUT_SECONDS)
+            if not comp_id:
+                log(f"{index}/{total_items} SKIP MissingComponentId name={name} version={version}")
+                skip_count += 1
+                continue
 
-            if r.status_code == 200:
-                exists_count += 1
-                status = "EXISTS 200"
+            del_url = f"{NEXUS_URL}/service/rest/v1/components/{comp_id}"
+
+            if DRY_RUN:
+                log(f"{index}/{total_items} DRYRUN Delete name={name} version={version} id={comp_id}")
+                time.sleep(SLEEP_SECONDS)
+                continue
+
+            try:
+                r = session.delete(del_url, timeout=TIMEOUT_SECONDS)
+            except Exception as e:
+                log(f"{index}/{total_items} FAIL DeleteRequest name={name} version={version} id={comp_id} error={e}")
+                fail_count += 1
+                time.sleep(SLEEP_SECONDS)
+                continue
+
+            if r.status_code == 204:
+                log(f"{index}/{total_items} OK Deleted name={name} version={version} id={comp_id}")
+                success_count += 1
             elif r.status_code == 404:
-                not_found_count += 1
-                status = "NOT_FOUND 404"
+                log(f"{index}/{total_items} SKIP NotFound name={name} version={version} id={comp_id}")
+                skip_count += 1
             elif r.status_code == 401:
-                error_count += 1
-                status = "UNAUTHORIZED 401"
+                log(f"{index}/{total_items} FAIL Unauthorized name={name} version={version} id={comp_id}")
+                fail_count += 1
             else:
-                error_count += 1
-                status = f"ERROR {r.status_code}"
+                log(
+                    f"{index}/{total_items} FAIL DeleteStatus name={name} version={version} "
+                    f"id={comp_id} status={r.status_code} body={r.text}"
+                )
+                fail_count += 1
 
-            if i % PRINT_EVERY == 0 or i == total:
-                print(f"Progress {i}/{total} Current {name}:{version} Status {status}")
+            time.sleep(SLEEP_SECONDS)
 
-        except Exception as e:
-            error_count += 1
-            if i % PRINT_EVERY == 0 or i == total:
-                print(f"Progress {i}/{total} Current {name}:{version} Status REQUEST_ERROR {e}")
+        end_time = datetime.datetime.now()
+        duration = end_time - start_time
 
-    print("Summary")
-    print(f"CheckedRows: {total}")
-    print(f"Exists: {exists_count}")
-    print(f"NotFound: {not_found_count}")
-    print(f"Errors: {error_count}")
-    print(f"SkippedMissingId: {skip_count}")
+        log("")
+        log("Job summary")
+        log(f"EndTime: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log(f"Duration: {duration}")
+        log(f"Deleted: {success_count}")
+        log(f"Failed: {fail_count}")
+        log(f"Skipped: {skip_count}")
+        log("")
+        log("Next steps")
+        log("Run repository cleanup and blob store compaction tasks in Nexus to reclaim disk space")
 
-    if exists_count == 0 and not_found_count > 0:
-        print("Result: all candidates are not found. Consider rebuilding search index")
-    elif exists_count > 0:
-        print("Result: some components still exist. Deletion may be incomplete")
+    print(f"Report written to: {report_file}")
 
 
 if __name__ == "__main__":
-    check_component_existence()
+    execute_mass_deletion()
