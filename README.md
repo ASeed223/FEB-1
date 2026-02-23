@@ -1,1 +1,3 @@
-pip install requests kubernetes --trusted-host pypi.org --trusted-host files.pythonhosted.org
+pip install --user kubernetes
+
+python -m pip install --user --upgrade pip
