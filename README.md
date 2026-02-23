@@ -1,208 +1,356 @@
-import csv
-import datetime
+#!/usr/bin/python3
+
+"""
+File:   purge_images.py
+Author: Sam Peterson
+Modified for Nexus By: Brandon Urban
+
+This is the main python script which is used to clean up the Nexus docker registry for OCP images.
+
+This script requires 4 configuration parameters as environment variables:
+
+    REG_HOST_PORT - The registry host to connect to (optionally including port)
+    REG_USERNAME  - The username for repository login
+    REG_PASSWORD  - The password for repository login
+
+    ACTUALLY_DELETE - If set to 'true' will actually cause deletions, rather
+                      than simply echoing the skopeo commands to the log.
+                      Variable can be ommitted, in which case it's false.
+
+Optionally, a third configuration parameter determines the prefixes of the
+repositories that purging will be limited to. By default, ["ets/", "b2b/"] will be
+used.
+
+    REPO_PREFIXES  - json array of string prefixes to limit purging to.
+
+The basic logic of the script is to discover all image sha256 urls not in use.
+First, we inspect all image streams in the cluster. Then all docker repo tags
+are inspected for their sha256 values. Then the set of those values, minus the
+image stream values, is created, and that final list is sequentially deleted by
+using "skopeo delete"
+
+Note that disk space will not be cleared until garbage collection is run on the
+respective docker registry. This should have already been configured to run hourly
+on the DMZ registries. Once garbage collection is run, it is important that the
+registry is restarted as well.
+
+"""
+
+import subprocess as sub
+import sys
+import json
 import os
-from collections import defaultdict
-from urllib.parse import urlparse
-
+import pprint
+import argparse
+import logging
+import getpass
+import urllib3
 import requests
+import openshift_client as oc
+import openshift
+import pprint
+import base64
+from requests.auth import HTTPBasicAuth
+from typing import List, Tuple, Set
+from kubernetes import client, config
+from kubernetes.config.config_exception import ConfigException
+from urllib3.exceptions import InsecureRequestWarning
+from urllib.parse import urlparse
+from openshift.dynamic import DynamicClient
+from openshift.helper.userpassauth import OCPLoginConfiguration
 
-# Configuration
-NEXUS_URL = "https://lxpd195:8444"
-USERNAME = "nexus"
-PASSWORD = os.getenv("NEXUS_PASSWORD", "your_password_here")
-REPO_NAME = "SIP_Development"
+logging.basicConfig(level=logging.INFO,
+        format="%(asctime)s %(levelname)s - %(filename)s: %(message)s")
 
-DAYS_OLD = 730
-KEEP_VERSIONS = 10
+def parse_args():
+    parser = argparse.ArgumentParser(description="Clean up unused Nexus images by comparing with OCP clusters")
 
-VERIFY_SSL = False
-TIMEOUT_SECONDS = 30
+    # Core Nexus parameters
+    parser.add_argument("--nexusHost", required=False, help="Nexus repository hostname")
+    parser.add_argument("--nexusUsername", required=False, help="Nexus login username")
+    parser.add_argument("--nexusPassword", required=False, help="Nexus login password")
+    parser.add_argument("--nexusRepo", action="append", required=False, help="Name(s) of the Nexus repository")
+    
+    # OpenShift clusters
+    parser.add_argument("--nonConfClusterHost", required=True, help="Non-confidential OpenShift cluster host")
+    parser.add_argument("--confClusterHost", required=False, help="Confidential OpenShift cluster host")
 
-BASE_DIR = r"C:\Users\C4387\Desktop\nexus_cleanup"
-if not os.path.exists(BASE_DIR):
-    os.makedirs(BASE_DIR)
+    # Cluster auth options
+    parser.add_argument("--nonConfUsername", required=True, help="Non-Conf cluster username")
+    parser.add_argument("--nonConfToken", required=True, help="Bearer token for non-conf OCP cluster")
+    parser.add_argument("--confUsername", required=False,help="Conf cluster username")
+    parser.add_argument("--confToken", required=False, help="Bearer token for confidential OCP cluster")
+    parser.add_argument("--maxResultPages",required=False,const=50, nargs='?', type=int, help="Max number of pages for returned results.")
+    return parser.parse_args()
 
-parsed_url = urlparse(NEXUS_URL)
-hostname = parsed_url.hostname or "unknown_host"
-
-report_filename = f"cleanup_candidates_{hostname}_{REPO_NAME}.csv"
-CSV_REPORT_FILE = os.path.join(BASE_DIR, report_filename)
-
-requests.packages.urllib3.disable_warnings()
-
-
-def parse_nexus_iso(dt_str):
-    if not dt_str:
-        return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-
-    s = str(dt_str).strip()
+def get_images_from_cluster(cluster_host, token=None, verify_ssl=True, auth_mode=None):
+    logging.info(f"Connecting to OpenShift cluster at {cluster_host}")
+    configuration = client.Configuration()
+    configuration.host = f"https://{cluster_host}"
+    configuration.verify_ssl = verify_ssl
+    configuration.ssl_ca_cert = "/home/cmdeploy/burban/nonprod.pem"
     try:
-        base = s[:19]  # YYYY-MM-DDTHH:MM:SS
-        dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
-        return dt.replace(tzinfo=datetime.timezone.utc)
-    except Exception:
-        return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+        configuration.api_key = {"authorization": f"Bearer {token}"}
+        logging.debug("Using bearer token authentication")
+    except Exception as e:
+        logging.error(f"Error fetching pod data from {cluster_host}: {e}")
+        return set()
+
+    # Use manual configuration    
+    api_client = client.ApiClient(configuration)
+    v1 = client.CoreV1Api(api_client)
+    images = set()
+    try:       
+        pod_list = v1.list_pod_for_all_namespaces(watch=False)
+        for pod in pod_list.items:
+            for container in pod.spec.containers:
+                images.add(container.image)
+            if pod.spec.init_containers:
+                for init in pod.spec.init_containers:
+                    images.add(init.image)
+    except Exception as e:
+        logging.error(f"Error fetching pod data from {cluster_host}: {e}")
+        return set()
+    logging.info(f"Found {len(images)} unique images in use on {cluster_host}")    
+    logging.info(f"The following images were found:\n {pprint.pprint(images)} ")
+    return images
+
+def get_imagestreams_from_cluster(cluster_host, token=None, verify_ssl=True, auth_mode=None):
+    logging.info(f"Connecting to OpenShift cluster at {cluster_host}")
+    configuration = client.Configuration()
+    configuration.host = f"https://{cluster_host}"
+    configuration.verify_ssl = verify_ssl
+    configuration.api_key =  {"authorization": f"Bearer {token}" }    
+    # Use manual configuration    
+    theClient = client.ApiClient(configuration)    
+    api_client = DynamicClient(theClient)    
+    ets_pods = []
+    used_images= set()
+    tags = set()
+    validNamespaces = "ets-tst1a,ets-tst1b,ets-tst2a,ets-tst2b,ets-tst2c,ets-tst2d"
+    namespaceList = validNamespaces.split(',')
+    for namespace in namespaceList:        
+        try:            
+            imagestream_api = api_client.resources.get(api_version='image.openshift.io/v1', kind='ImageStream')            
+            # List imagestreams in the specified namespace
+            imagestreams = imagestream_api.get(namespace=namespace)
+
+            if imagestreams.items:                
+                for iStream in imagestreams.items:                    
+                    streamName = iStream.metadata.name
+                    imageStream = imagestream_api.get(name=streamName, namespace=namespace)
+                    if(imageStream.spec.tags):
+                        print(f"Tags for ImageStream '{streamName}' in namespace '{namespace}':")
+                        for tag in imageStream.spec.tags:                            
+                            if tag["from"]:
+                                tagKind = tag["from"]
+                                if tagKind.kind == 'DockerImage':
+                                    print(f"    Source Docker Image: {tagKind.name}")                                
+                                else:
+                                    print(f"Could not find a tag type of DockerImage for ImageStream '{streamName}' in '{namespace}'.")
+                            else:
+                                print(f"Could not retrieve tags for ImageStream '{streamName}' in '{namespace}'.")
+                    else:
+                        print(f"No tags found for ImageStream '{streamName}' in '{namespace}'")
+            else:
+                print(f"No imagestreams found in namespace '{namespace}'.")
+        except client.ApiException as e:
+            print(f"Error listing Image Streams: {e}")
+            return set()
+        logging.info(f"Found {len(tags)} unique images in use on {cluster_host}")    
+        logging.info(f"The following images were found:\n {pprint.pprint(tags)} ")
+    return tags
 
 
-def safe_int(v, default=0):
-    try:
-        if v is None:
-            return default
-        return int(v)
-    except Exception:
-        return default
-
-
-def analyze_component(component):
-    assets = component.get("assets") or []
-    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-
-    if not assets:
-        return epoch, epoch, 0, 0, 0
-
-    publish_dates = []
-    used_dates = []
-    total_bytes = 0
-    total_downloads = 0
-
-    for a in assets:
-        total_bytes += safe_int(a.get("fileSize"), 0)
-        total_downloads += safe_int(a.get("downloadCount"), 0)
-
-        p_dt = parse_nexus_iso(a.get("lastModified"))
-        publish_dates.append(p_dt)
-
-        d_str = a.get("lastDownloaded")
-        used_dates.append(parse_nexus_iso(d_str) if d_str else p_dt)
-
-    return max(publish_dates), max(used_dates), total_bytes, total_downloads, len(assets)
-
-
-def fetch_all_components(session):
-    components = []
-    url = f"{NEXUS_URL}/service/rest/v1/components"
-    params = {"repository": REPO_NAME}
-
+def get_images_from_nexus(nexus_host, username, password, repo, verify_ssl=True, max_pages=50):
+    logging.info("Fetching images from Nexus...")    
+    base_url = f"https://{nexus_host}/service/rest/v1/components?repository={repo}"
+    all_images = set()    
+    continuation_token = None        
+    page = 0
     while True:
-        r = session.get(url, params=params, timeout=TIMEOUT_SECONDS, verify=VERIFY_SSL)
-        if r.status_code != 200:
-            raise RuntimeError(f"Fetch failed status={r.status_code} body={r.text}")
+        if page >= max_pages:
+            logging.warning(f"Reached maxPages ({max_pages}) for repo '{repo}' — stopping pagination")
+            break       
+        if continuation_token:
+            params["continuationToken"] = continuation_token
 
-        data = r.json() or {}
-        items = data.get("items") or []
-        components.extend(items)
+        response = requests.get(
+            base_url,
+            auth=HTTPBasicAuth(username, password),
+            verify=verify_ssl
+        )
 
-        token = data.get("continuationToken")
-        if not token:
+        if response.status_code != 200:
+            logging.error(f"Failed to fetch from Nexus ({repo}): {response.status_code} - {response.text}")
             break
+        data = response.json()
+        for item in data.get("items", []):           
+            image_name = item.get("name")
+            for asset in item.get("assets", []):
+                tag = asset.get("attributes", {}).get("docker", {}).get("tag")
+                if image_name and tag:
+                    full_name = f"{repo}/{image_name}:{tag}"
+                    all_images.add(full_name)
 
-        params = {"repository": REPO_NAME, "continuationToken": token}
-        print(f"Fetched {len(components)} components")
+        continuation_token = data.get("continuationToken")
+        if not continuation_token:
+            break
+        page += 1
+    logging.info(f"Fetched {len(all_images)} total images from Nexus.")
+    return all_images
 
-    return components
+def get_specific_project_images_from_nexus(nexus_host, username, password, repo, project_list, release_list, verify_ssl=True, max_pages=50):
+    logging.info("Fetching images from Nexus...")    
+    base_url = f"https://{nexus_host}/service/rest/v1/components?repository={repo}"
+    all_images = []        
+    continuation_token = None        
+    page = 0
+    
+    while True:
+        params = {}
+        print(f"Page # {page}")
+        if page >= max_pages:
+            logging.warning(f"Reached maxPages ({max_pages}) for repo '{repo}' — stopping pagination")
+            break
+        
+        if continuation_token:
+            params["continuationToken"] = continuation_token        
+
+        response = requests.get(
+            base_url,
+            auth=(username, password),
+            params=params,
+            verify=verify_ssl
+        )
+
+        if response.status_code != 200:
+            logging.error(f"Failed to fetch from Nexus ({repo}): {response.status_code} - {response.text}")
+            break
+        data = response.json()
+        for item in data.get("items", []):
+            image_name = item.get("name")
+            print(f"Checking item: {image_name}")
+            img_proj = image_name.split("/", 1)
+            print(f"image_name split: {img_proj}")
+            project = img_proj[len(img_proj)-1]
+            print(f"project: {project}")
+            if project in project_list:                                                    
+                version = item.get("version")
+                print(f"Found name: {project}")
+                print(f"Found version: {version}")
+                if image_name and version:                    
+                    for release in release_list:
+                        if release in version:
+                            print("Found project name and release number.")
+                            component_id = item.get("id")
+                            full_name = f"{project}:{version}:{component_id}"
+                            all_images.append(full_name)
+        continuation_token = data.get("continuationToken")
+        print(f"Continuation token: {continuation_token}")
+        if not continuation_token:
+            break
+        page += 1
+    all_images.sort()
+    #pprint.pprint(all_images)
+    logging.info(f"Fetched {len(all_images)} total images from Nexus.")
+    return all_images
+
+def delete_nexus_images(nexus_host, username, password, repo, image_path_list, verify_ssl=True, dry_run=True, max_pages=50):
+    logging.info("Deleting unused images in Nexus...")
+    base_url = f"https://{nexus_host}"    
+    deleted_count = 0    
+    kept_count = 0    
+    for image_path in image_path_list:   
+        print(f"current image path: {image_path}")
+        image_data = image_path.split(':')
+        component_name = image_data[0]
+        component_version = image_data[1]
+        component_id = image_data[2]
+        if not dry_run:
+            delete_url = f"{base_url}/service/rest/v1/components/{component_id}"
+            print(f"Delete URL: {delete_url}")
+            del_resp = requests.delete(delete_url, auth=(username, password))
+            if del_resp.status_code == 204:
+                logging.info(f"Deleted {component_name} with image path: {image_path}")
+                deleted_count += 1
+            else:
+                logging.error(f"Failed to delete {component_name}, version {component_version} with image path: {image_path}: {del_resp.status_code}")
+        else:
+            logging.info(f"[Dry-run] Would delete: {base_url}{image_path}")
+            deleted_count += 1                        
+    logging.info(f"Deletion summary: {deleted_count} deleted (or would be), {kept_count} kept")
 
 
-def run_rigorous_scan():
-    print("Scan started")
-    print(f"Host: {hostname}")
-    print(f"Repository: {REPO_NAME}")
-    print(f"PolicyDaysOld: {DAYS_OLD}")
-    print(f"KeepVersions: {KEEP_VERSIONS}")
-    print(f"Output: {CSV_REPORT_FILE}")
+def redact(s):
+    return "****" if s else None 
 
-    session = requests.Session()
-    session.auth = (USERNAME, PASSWORD)
-    session.verify = VERIFY_SSL
+def main():
+    """Main"""
+    args = parse_args()
 
-    try:
-        components = fetch_all_components(session)
-    except Exception as e:
-        print(f"Fetch error: {e}")
-        return
+    # Setup logging    
+    logging.basicConfig(filename='~/burban/output.log', encoding='uft-8', level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    grouped = defaultdict(list)
-    for comp in components:
-        name = comp.get("name")
-        if name:
-            grouped[name].append(comp)
+    # Normalize SSL flag    
+    verify_ssl = False
+    nexusImages = []
+    nexusUsername = 'f5593'
+    nexusPassword = 'VegasR@iders2023'
+    repo = 'SIP_Development'
+    releaseList = ['25.1.']
+    projectList = ['noticing-services-app','noticing-ui-app']
+        
+    nexusImages = get_specific_project_images_from_nexus(
+            nexus_host = args.nexusHost, 
+            username = nexusUsername, 
+            password = nexusPassword, 
+            repo = repo,
+            project_list = projectList,
+            release_list = releaseList,
+            verify_ssl=verify_ssl,
+            max_pages = args.maxResultPages
+        )
+    logging.info("Nexus images found:")
+    logging.info(pprint.pprint(nexusImages))
+        
+    deleted_images = delete_nexus_images(
+        nexus_host = args.nexusHost,
+        username = nexusUsername,
+        password = nexusPassword,
+        repo = repo,
+        image_path_list = nexusImages,
+        dry_run = True
+    )
+    
+    logging.info(pprint.pprint(deleted_images))
 
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    cutoff_dt = now_utc - datetime.timedelta(days=DAYS_OLD)
 
-    candidates = []
-    total_freed_bytes = 0
+    #logging.info("Querying images from confidential cluster...")
+    #conf_images = get_images_from_cluster(
+    #    cluster_host=args.confClusterHost,
+    #    token=args.confToken,
+    #    verify_ssl=args.verify_ssl,
+    #    auth_mode=args.clusterAuthMode
+    #)
 
-    for name, versions in grouped.items():
-        for comp in versions:
-            p_dt, u_dt, size, d_count, a_count = analyze_component(comp)
-            comp["_publish_dt"] = p_dt
-            comp["_used_dt"] = u_dt
-            comp["_size"] = size
-            comp["_total_downloads"] = d_count
-            comp["_asset_count"] = a_count
+    #all_used_images = non_conf_images.union(conf_images)
+    #logging.info(f"Total unique iU0lQX0RldmVsb3BtZW50Ojc1ODgwNTEwmages in use: {len(all_used_images)}")
 
-        versions.sort(key=lambda x: x["_publish_dt"], reverse=True)
-
-        for comp in versions[KEEP_VERSIONS:]:
-            if comp["_used_dt"] < cutoff_dt:
-                total_freed_bytes += comp["_size"]
-
-                age_days = (now_utc - comp["_publish_dt"]).days
-                idle_days = (now_utc - comp["_used_dt"]).days
-
-                candidates.append(
-                    {
-                        "Format": comp.get("format", "docker"),
-                        "Name": name,
-                        "Version": comp.get("version", ""),
-                        "Component ID": comp.get("id", ""),
-                        "Publish Date": comp["_publish_dt"].strftime("%Y-%m-%d"),
-                        "Age (Days)": age_days,
-                        "Last Downloaded": comp["_used_dt"].strftime("%Y-%m-%d"),
-                        "Days Idle": idle_days,
-                        "Total Downloads": comp["_total_downloads"],
-                        "Asset Count": comp["_asset_count"],
-                        "Size (MB)": round(comp["_size"] / (1024 * 1024), 2),
-                        "Justification": f"Idle>{DAYS_OLD} days and outside top {KEEP_VERSIONS} newest",
-                    }
-                )
-
-    total_gb = total_freed_bytes / (1024 * 1024 * 1024)
-
-    print("Scan complete")
-    print(f"TotalComponents: {len(components)}")
-    print(f"Candidates: {len(candidates)}")
-    print(f"EstimatedSizeGB: {total_gb:.2f}")
-
-    if not candidates:
-        print("No candidates found")
-        return
-
-    try:
-        with open(CSV_REPORT_FILE, mode="w", encoding="utf-8-sig", newline="") as f:
-            fieldnames = [
-                "Format",
-                "Name",
-                "Version",
-                "Component ID",
-                "Publish Date",
-                "Age (Days)",
-                "Last Downloaded",
-                "Days Idle",
-                "Total Downloads",
-                "Asset Count",
-                "Size (MB)",
-                "Justification",
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(candidates)
-
-        print(f"Report written: {CSV_REPORT_FILE}")
-
-    except Exception as e:
-        print(f"CSV write error: {e}")
-
+    # Run cleanup    
+    #delete_unused_nexus_images(
+    #    nexus_host=args.nexusHost,
+    #    username=args.nexusUsername,
+    #    password=args.nexusPassword,
+    #    repos=args.nexusRepo,
+    #    used_images=all_used_images,
+    #    verify_ssl=args.verify_ssl,
+    #    dry_run=args.dry_run,
+    #    max_pages=args.maxPages,
+    #    protect_patterns=args.protectRegex,
+    #    summary_log_path=args.logSummaryFile,
+    #    summary_format=args.summaryFormat
+    #)
 
 if __name__ == "__main__":
-    run_rigorous_scan()
+    main()
