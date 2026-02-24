@@ -1,124 +1,189 @@
 import csv
-import os
-import time
 import datetime
+import os
+from collections import defaultdict
+
 import requests
 
 # Configuration
-NEXUS_URL = "https://lxpd195:8444"
+NEXUS_URL = "http://lxpd195:8081"
 USERNAME = "nexus"
 PASSWORD = os.getenv("NEXUS_PASSWORD", "your_password_here")
 
-CSV_FILE = r"C:\Users\C4387\Desktop\nexus_cleanup\ultimate_cleanup_candidates.csv"
+REPOSITORY = "SIP_Development"
+DAYS_DEAD = 365
 
-VERIFY_SSL = False
 TIMEOUT_SECONDS = 30
-SLEEP_SECONDS = 0.05
-
-DRY_RUN = False  # Set True to test without deleting
+VERIFY_SSL = True  # keep True for http, set False only for self-signed https
 
 requests.packages.urllib3.disable_warnings()
 
+projects_info = defaultdict(
+    lambda: {
+        "latest_date": datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc),
+        "latest_tag": "N/A",
+        "total_versions": 0,
+    }
+)
 
-def execute_mass_deletion():
-    if not os.path.exists(CSV_FILE):
-        print(f"File not found: {CSV_FILE}")
+
+def parse_asset_dt(dt_str):
+    if not dt_str:
+        return None
+
+    s = str(dt_str).strip()
+
+    # Typical Nexus: 2024-01-02T03:04:05.678+00:00 or ...Z
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+
+    try:
+        dt = datetime.datetime.fromisoformat(s)
+    except Exception:
+        try:
+            base = s[:19]
+            dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        except Exception:
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+
+    return dt.astimezone(datetime.timezone.utc)
+
+
+def fetch_components(session):
+    """
+    Nexus versions differ:
+      - Some support /service/rest/v1/components
+      - Some support /service/rest/beta/components
+    This tries v1 first, then beta.
+    """
+    base = NEXUS_URL.rstrip("/")
+    paths = ["/service/rest/v1/components", "/service/rest/beta/components"]
+
+    last_err = None
+    for p in paths:
+        components = []
+        token = None
+        scanned = 0
+        page = 0
+
+        while True:
+            params = {"repository": REPOSITORY}
+            if token:
+                params["continuationToken"] = token
+
+            url = f"{base}{p}"
+            try:
+                r = session.get(url, params=params, timeout=TIMEOUT_SECONDS, verify=VERIFY_SSL)
+                if r.status_code == 404:
+                    last_err = f"404 on {url}"
+                    break
+                r.raise_for_status()
+                data = r.json() or {}
+            except Exception as e:
+                last_err = str(e)
+                break
+
+            items = data.get("items") or []
+            components.extend(items)
+            scanned += len(items)
+            page += 1
+
+            if scanned and scanned % 1000 == 0:
+                print(f"Scanned {scanned} components")
+
+            token = data.get("continuationToken")
+            if not token:
+                return components, p
+
+            # Safety: stop if API loops
+            if page > 10000:
+                raise RuntimeError("Too many pages, possible API loop")
+
+        # try next path
+    raise RuntimeError(f"Could not fetch components. LastError: {last_err}")
+
+
+def get_dead_projects():
+    print(f"Scanning repository {REPOSITORY}")
+    print(f"InactiveDaysThreshold: {DAYS_DEAD}")
+
+    session = requests.Session()
+    session.auth = (USERNAME, PASSWORD)
+
+    try:
+        components, api_used = fetch_components(session)
+    except Exception as e:
+        print(f"Fetch error: {e}")
         return
 
-    base_dir = os.path.dirname(CSV_FILE) or "."
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_file = os.path.join(base_dir, f"mass_deletion_report_{ts}.txt")
+    print(f"APIUsed: {api_used}")
+    print(f"TotalComponentsFetched: {len(components)}")
 
-    start_time = datetime.datetime.now()
+    if not components:
+        print("No components returned by API")
+        return
 
-    success_count = 0
-    fail_count = 0
-    skip_count = 0
+    for item in components:
+        project_name = item.get("name") or ""
+        tag_version = item.get("version") or "N/A"
+        if not project_name:
+            continue
 
-    with open(report_file, mode="w", encoding="utf-8") as log_file:
+        projects_info[project_name]["total_versions"] += 1
 
-        def log(msg: str) -> None:
-            print(msg)
-            log_file.write(msg + "\n")
-
-        log("Mass deletion job started")
-        log(f"StartTime: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        log(f"NexusURL: {NEXUS_URL}")
-        log(f"CSVFile: {CSV_FILE}")
-        log(f"DryRun: {DRY_RUN}")
-        log("")
-
-        session = requests.Session()
-        session.auth = (USERNAME, PASSWORD)
-        session.verify = VERIFY_SSL
-
-        with open(CSV_FILE, mode="r", encoding="utf-8-sig", newline="") as file:
-            reader = csv.DictReader(file)
-            rows = list(reader)
-
-        total_items = len(rows)
-        log(f"TotalRows: {total_items}")
-        log("")
-
-        for index, row in enumerate(rows, 1):
-            comp_id = (row.get("Component ID") or "").strip()
-            name = (row.get("Name") or "").strip()
-            version = (row.get("Version") or "").strip()
-
-            if not comp_id:
-                log(f"{index}/{total_items} SKIP MissingComponentId name={name} version={version}")
-                skip_count += 1
+        for asset in item.get("assets") or []:
+            asset_dt = parse_asset_dt(asset.get("lastModified"))
+            if not asset_dt:
                 continue
 
-            del_url = f"{NEXUS_URL}/service/rest/v1/components/{comp_id}"
+            if asset_dt > projects_info[project_name]["latest_date"]:
+                projects_info[project_name]["latest_date"] = asset_dt
+                projects_info[project_name]["latest_tag"] = tag_version
 
-            if DRY_RUN:
-                log(f"{index}/{total_items} DRYRUN Delete name={name} version={version} id={comp_id}")
-                time.sleep(SLEEP_SECONDS)
-                continue
+    now = datetime.datetime.now(datetime.timezone.utc)
+    csv_filename = f"dead_docker_projects_{REPOSITORY}_{now.strftime('%Y%m%d_%H%M')}.csv"
 
-            try:
-                r = session.delete(del_url, timeout=TIMEOUT_SECONDS)
-            except Exception as e:
-                log(f"{index}/{total_items} FAIL DeleteRequest name={name} version={version} id={comp_id} error={e}")
-                fail_count += 1
-                time.sleep(SLEEP_SECONDS)
-                continue
+    dead_rows = []
+    for project, info in projects_info.items():
+        days_inactive = (now - info["latest_date"]).days
+        if days_inactive > DAYS_DEAD:
+            dead_rows.append(
+                [
+                    project,
+                    days_inactive,
+                    info["latest_date"].strftime("%Y-%m-%d %H:%M:%S"),
+                    info["latest_tag"],
+                    info["total_versions"],
+                    "DELETE_ENTIRE_PROJECT",
+                ]
+            )
 
-            if r.status_code == 204:
-                log(f"{index}/{total_items} OK Deleted name={name} version={version} id={comp_id}")
-                success_count += 1
-            elif r.status_code == 404:
-                log(f"{index}/{total_items} SKIP NotFound name={name} version={version} id={comp_id}")
-                skip_count += 1
-            elif r.status_code == 401:
-                log(f"{index}/{total_items} FAIL Unauthorized name={name} version={version} id={comp_id}")
-                fail_count += 1
-            else:
-                log(
-                    f"{index}/{total_items} FAIL DeleteStatus name={name} version={version} "
-                    f"id={comp_id} status={r.status_code} body={r.text}"
-                )
-                fail_count += 1
+    try:
+        out_path = os.path.join(os.getcwd(), csv_filename)
+        with open(out_path, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "ProjectPath",
+                    "DaysInactive",
+                    "LastActiveDateUTC",
+                    "LatestTag",
+                    "TotalVersions",
+                    "Action",
+                ]
+            )
+            writer.writerows(dead_rows)
 
-            time.sleep(SLEEP_SECONDS)
+        print(f"Report written: {out_path}")
+        print(f"DeadProjects: {len(dead_rows)}")
 
-        end_time = datetime.datetime.now()
-        duration = end_time - start_time
-
-        log("")
-        log("Job summary")
-        log(f"EndTime: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        log(f"Duration: {duration}")
-        log(f"Deleted: {success_count}")
-        log(f"Failed: {fail_count}")
-        log(f"Skipped: {skip_count}")
-        log("")
-        log("Next steps")
-        log("Run repository cleanup and blob store compaction tasks in Nexus to reclaim disk space")
-
-    print(f"Report written to: {report_file}")
+    except Exception as e:
+        print(f"CSV write error: {e}")
 
 
 if __name__ == "__main__":
-    execute_mass_deletion()
+    get_dead_projects()
