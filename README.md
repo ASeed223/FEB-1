@@ -3,7 +3,6 @@ import datetime
 import os
 from collections import defaultdict
 from urllib.parse import urlparse
-
 import requests
 
 # Configuration
@@ -30,19 +29,16 @@ CSV_REPORT_FILE = os.path.join(BASE_DIR, report_filename)
 
 requests.packages.urllib3.disable_warnings()
 
-
 def parse_nexus_iso(dt_str):
     if not dt_str:
         return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-
     s = str(dt_str).strip()
     try:
-        base = s[:19]  # YYYY-MM-DDTHH:MM:SS
+        base = s[:19]
         dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
         return dt.replace(tzinfo=datetime.timezone.utc)
     except Exception:
         return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-
 
 def safe_int(v, default=0):
     try:
@@ -51,7 +47,6 @@ def safe_int(v, default=0):
         return int(v)
     except Exception:
         return default
-
 
 def analyze_component(component):
     assets = component.get("assets") or []
@@ -68,19 +63,18 @@ def analyze_component(component):
     for a in assets:
         total_bytes += safe_int(a.get("fileSize"), 0)
         total_downloads += safe_int(a.get("downloadCount"), 0)
-
+        
         p_dt = parse_nexus_iso(a.get("lastModified"))
         publish_dates.append(p_dt)
-
+        
         d_str = a.get("lastDownloaded")
         used_dates.append(parse_nexus_iso(d_str) if d_str else p_dt)
 
     return max(publish_dates), max(used_dates), total_bytes, total_downloads, len(assets)
 
-
 def fetch_all_components(session):
     components = []
-    url = f"{NEXUS_URL}/service/rest/v1/components"
+    url = f"{NEXUS_URL}/service/rest/beta/components"
     params = {"repository": REPO_NAME}
 
     while True:
@@ -97,18 +91,17 @@ def fetch_all_components(session):
             break
 
         params = {"repository": REPO_NAME, "continuationToken": token}
-        print(f"Fetched {len(components)} components")
+        print(f"Fetched {len(components)} components...")
 
     return components
 
-
 def run_rigorous_scan():
-    print("Scan started")
+    print("--- Nexus Cleanup Scan Started ---")
     print(f"Host: {hostname}")
     print(f"Repository: {REPO_NAME}")
-    print(f"PolicyDaysOld: {DAYS_OLD}")
-    print(f"KeepVersions: {KEEP_VERSIONS}")
-    print(f"Output: {CSV_REPORT_FILE}")
+    print(f"Policy: Delete images idle > {DAYS_OLD} days (Keeping top {KEEP_VERSIONS} newest)")
+    print(f"Output File: {CSV_REPORT_FILE}")
+    print("----------------------------------")
 
     session = requests.Session()
     session.auth = (USERNAME, PASSWORD)
@@ -146,63 +139,61 @@ def run_rigorous_scan():
         for comp in versions[KEEP_VERSIONS:]:
             if comp["_used_dt"] < cutoff_dt:
                 total_freed_bytes += comp["_size"]
-
                 age_days = (now_utc - comp["_publish_dt"]).days
                 idle_days = (now_utc - comp["_used_dt"]).days
 
                 candidates.append(
                     {
-                        "Format": comp.get("format", "docker"),
-                        "Name": name,
-                        "Version": comp.get("version", ""),
-                        "Component ID": comp.get("id", ""),
-                        "Publish Date": comp["_publish_dt"].strftime("%Y-%m-%d"),
-                        "Age (Days)": age_days,
+                        "Repository": REPO_NAME,
+                        "Image Path": name,
+                        "Version/Tag": comp.get("version", ""),
+                        "Size (MB)": round(comp["_size"] / (1024 * 1024), 2),
                         "Last Downloaded": comp["_used_dt"].strftime("%Y-%m-%d"),
                         "Days Idle": idle_days,
+                        "Publish Date": comp["_publish_dt"].strftime("%Y-%m-%d"),
+                        "Age (Days)": age_days,
                         "Total Downloads": comp["_total_downloads"],
                         "Asset Count": comp["_asset_count"],
-                        "Size (MB)": round(comp["_size"] / (1024 * 1024), 2),
-                        "Justification": f"Idle>{DAYS_OLD} days and outside top {KEEP_VERSIONS} newest",
+                        "Justification": f"Idle > {DAYS_OLD} days, not in top {KEEP_VERSIONS}",
+                        "Component ID": comp.get("id", "")
                     }
                 )
 
     total_gb = total_freed_bytes / (1024 * 1024 * 1024)
 
-    print("Scan complete")
-    print(f"TotalComponents: {len(components)}")
-    print(f"Candidates: {len(candidates)}")
-    print(f"EstimatedSizeGB: {total_gb:.2f}")
+    print("\n--- Scan Complete ---")
+    print(f"Total Components Analyzed: {len(components)}")
+    print(f"Cleanup Candidates Found: {len(candidates)}")
+    print(f"Estimated Space to Free: {total_gb:.2f} GB")
 
     if not candidates:
-        print("No candidates found")
+        print("No candidates found. Exiting.")
         return
 
     try:
         with open(CSV_REPORT_FILE, mode="w", encoding="utf-8-sig", newline="") as f:
             fieldnames = [
-                "Format",
-                "Name",
-                "Version",
-                "Component ID",
-                "Publish Date",
-                "Age (Days)",
+                "Repository",
+                "Image Path",
+                "Version/Tag",
+                "Size (MB)",
                 "Last Downloaded",
                 "Days Idle",
+                "Publish Date",
+                "Age (Days)",
                 "Total Downloads",
                 "Asset Count",
-                "Size (MB)",
                 "Justification",
+                "Component ID"
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(candidates)
 
-        print(f"Report written: {CSV_REPORT_FILE}")
+        print(f"Report successfully written to: {CSV_REPORT_FILE}")
 
     except Exception as e:
         print(f"CSV write error: {e}")
-
 
 if __name__ == "__main__":
     run_rigorous_scan()
