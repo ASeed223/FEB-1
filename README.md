@@ -1,1 +1,1 @@
-jboss-eap-7/eap74-openjdk11-openshift-rhel8
+grep -R "deleted=true" /opt/appdata/nexus/sonatype-work/nexus3/blobs/Docker | head
