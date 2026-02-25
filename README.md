@@ -1,2 +1,1 @@
-Good morning everyone, Yesterday morning, I mainly shadowed Edgar and Brandon to continue working on freeing up disk space on lxpd195. By the end of the day, we were able to recover another 100 GB of space.
-I discovered that the current Nexus version is limiting our ability to remove some unused images. I will continue researching possible solutions. If I’m unable to resolve it, I will continue working on the cleanup policy after the Nexus upgrade scheduled for this Friday. As for today, I will continue focusing on that. That’s my plan for today.
+Automatically remove pre-release and snapshot components published or unused for more than one year.
