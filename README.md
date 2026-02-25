@@ -10,7 +10,7 @@
 #         name: nexus
 #         state: stopped
 
-- name: Backup and direct transfer from source server
+- name: Backup database on source server
   hosts: lxpd194
   gather_facts: no
   any_errors_fatal: true
@@ -32,28 +32,27 @@
     - name: Set facts for backup file path and name
       become_user: postgres
       set_fact:
+        latest_backup_path: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
         backup_filename: "{{ (backup_files.files | sort(attribute='mtime') | last).path | basename }}"
 
-    - name: Change permissions to 777 on source backup file
+    # Download from lxpd194 to Ansible controller /tmp
+    - name: Fetch database backup to Ansible controller
       become_user: postgres
-      file:
-        path: "/opt/appdata/pgsql/backups/{{ backup_filename }}"
-        mode: '0777'
-
-    - name: Direct SCP transfer to target server (Non-interactive)
-      become_user: postgres
-      command: scp -o StrictHostKeyChecking=no -o BatchMode=yes -pr "{{ backup_filename }}" cmdeploy@lxpd211:/tmp/
-      args:
-        chdir: /opt/appdata/pgsql/backups
+      fetch:
+        src: "{{ latest_backup_path }}"
+        dest: "/tmp/{{ backup_filename }}"
+        flat: yes
 
 - name: Prepare database file on target server
   hosts: lxpd211
   gather_facts: no
   any_errors_fatal: true
   tasks:
-    - name: Set permissions on tmp database backup file
-      file:
-        path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+    # Upload from Ansible controller to lxpd211 /tmp
+    - name: Copy database backup to target server tmp
+      copy:
+        src: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+        dest: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
         mode: '0777'
 
     - name: Move database backup to postgres home directory
