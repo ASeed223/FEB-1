@@ -10,7 +10,7 @@
 #         name: nexus
 #         state: stopped
 
-- name: Backup and direct transfer from source to target
+- name: Backup database on source server
   hosts: lxpd194
   gather_facts: no
   any_errors_fatal: true
@@ -29,37 +29,31 @@
         patterns: "nexusdb2-*.bk"
       register: backup_files
 
-    - name: Set facts for the latest backup
+    - name: Set facts for backup file path and name
       become_user: postgres
       set_fact:
         latest_backup_path: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
         backup_filename: "{{ (backup_files.files | sort(attribute='mtime') | last).path | basename }}"
 
-    - name: Direct SCP from lxpd194 to lxpd211
+    # Directly transfer from lxpd194 to lxpd211 using scp
+    - name: Direct SCP backup to target server
       become_user: postgres
-      # This requires SSH keys to be set up between postgres@lxpd194 and cmdeploy@lxpd211
-      command: scp -pr "{{ latest_backup_path }}" cmdeploy@lxpd211:
+      command: scp -pr "{{ backup_filename }}" cmdeploy@lxpd211:
       args:
-        chdir: /tmp
-
-    - name: Cleanup old backups on source server (keep only latest)
-      become_user: postgres
-      shell: "find /opt/appdata/pgsql/backups -name 'nexusdb2-*.bk' ! -name '{{ backup_filename }}' -delete"
-      args:
-        chdir: /tmp
+        chdir: /opt/appdata/pgsql/backups
 
 - name: Prepare database file on target server
   hosts: lxpd211
   gather_facts: no
   any_errors_fatal: true
   tasks:
-    - name: Move database backup to tmp directory as cmdeploy
-      # File arrives in cmdeploy home via SCP
+    # File lands in cmdeploy home directory via SCP, move to /tmp
+    - name: Copy backup from cmdeploy home to tmp
       command: cp "~/{{ hostvars['lxpd194']['backup_filename'] }}" /tmp/
       args:
         chdir: /tmp
-      
-    - name: Set permissions on tmp backup file
+
+    - name: Set permissions on tmp database backup file
       file:
         path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
         mode: '0777'
