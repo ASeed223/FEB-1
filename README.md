@@ -1,1 +1,1 @@
-ls -lh /tmp/nexusdb2-*.bk
+rm -f /tmp/nexusdb2-*.bk
