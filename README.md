@@ -10,7 +10,7 @@
 #         name: nexus
 #         state: stopped
 
-- name: Backup DB and Node ID on source server
+- name: Backup database on source server
   hosts: lxpd194
   gather_facts: no
   any_errors_fatal: true
@@ -35,7 +35,7 @@
         latest_backup_path: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
         backup_filename: "{{ (backup_files.files | sort(attribute='mtime') | last).path | basename }}"
 
-    # Use 'fetch' to download from lxpd194 to Ansible controller
+    # Download from lxpd194 to Ansible controller /tmp
     - name: Fetch database backup to Ansible controller
       become_user: postgres
       fetch:
@@ -43,36 +43,16 @@
         dest: "/tmp/{{ backup_filename }}"
         flat: yes
 
-    - name: Compress Nexus Node ID keystores
-      become_user: root
-      command: tar -czvf /tmp/nexus-node-id.tar.gz -C /opt/appdata/nexus/sonatype-work/nexus3/keystores node
-      args:
-        chdir: /tmp
-
-    # Use 'fetch' to download Node ID archive to Ansible controller
-    - name: Fetch Node ID archive to Ansible controller
-      become_user: root
-      fetch:
-        src: /tmp/nexus-node-id.tar.gz
-        dest: /tmp/nexus-node-id.tar.gz
-        flat: yes
-
-- name: Prepare DB and Node ID files on target server
+- name: Prepare database file on target server
   hosts: lxpd211
   gather_facts: no
   any_errors_fatal: true
   tasks:
-    # Use 'copy' to upload from Ansible controller to lxpd211
+    # Upload from Ansible controller to lxpd211 /tmp
     - name: Copy database backup to target server tmp
       copy:
         src: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
         dest: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
-        mode: '0777'
-
-    - name: Copy Node ID archive to target server tmp
-      copy:
-        src: /tmp/nexus-node-id.tar.gz
-        dest: /tmp/nexus-node-id.tar.gz
         mode: '0777'
 
     - name: Move database backup to postgres home directory
@@ -88,23 +68,6 @@
     #   command: pg_restore -U postgres -d nexusdb --clean "~postgres/{{ hostvars['lxpd194']['backup_filename'] }}"
     #   args:
     #     chdir: /tmp
-
-    # - name: Extract Node ID archive
-    #   become: yes
-    #   become_user: root
-    #   command: tar -xzvf /tmp/nexus-node-id.tar.gz -C /opt/appdata/nexus/sonatype-work/nexus3/keystores
-    #   args:
-    #     chdir: /tmp
-    
-    # - name: Ensure correct ownership for restored Node ID
-    #   become: yes
-    #   become_user: root
-    #   file:
-    #     path: /opt/appdata/nexus/sonatype-work/nexus3/keystores/node
-    #     state: directory
-    #     owner: nexus
-    #     group: nexus
-    #     recurse: yes
 
 # - name: Start Nexus application
 #   hosts: lxpd208, lxpd209
