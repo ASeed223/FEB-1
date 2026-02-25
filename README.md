@@ -62,6 +62,14 @@
       args:
         chdir: /tmp
 
+    # 自动清理 Ansible 本地的临时文件
+    - name: Clean up temporary backup file on Ansible controller
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+        state: absent
+
     # - name: Restore PostgreSQL database
     #   become: yes
     #   become_user: postgres
