@@ -1,8 +1,6 @@
 ---
-# =======================================================================
-# [Commented Out] Step 1: Stop Nexus Application
-# =======================================================================
-# - hosts: lxpd208,lxpd209
+# - name: Stop Nexus application
+#   hosts: lxpd208, lxpd209
 #   gather_facts: no
 #   any_errors_fatal: true
 #   become: yes
@@ -12,131 +10,93 @@
 #         name: nexus
 #         state: stopped
 
-# =======================================================================
-# Step 2: Backup DB and Node ID on Source (lxpd194) and transfer to lxpd211
-# =======================================================================
-- hosts: lxpd194
+- name: Backup DB and Node ID on source server
+  hosts: lxpd194
   gather_facts: no
   any_errors_fatal: true
   become: yes
   become_user: postgres
-  become_flags: "-i"
-  vars:
-    backup_dir: "/opt/appdata/pgsql/backups"
-    node_archive: "/tmp/nexus-node-id.tar.gz"
-    node_dir: "/opt/appdata/nexus/sonatype-work/nexus3/keystores/node"
-    target_host: "lxpd211"
-    target_user: "cmdeploy"
-    target_db_dest: "/tmp"
-    target_node_dest: "/tmp"
   tasks:
-    - name: Run backup script
-      shell: ./backupnexusDB.bsh
+    - name: Execute database backup script
+      shell: bash ~postgres/backupnexusDB.bsh
       args:
-        chdir: "~"
+        chdir: /tmp
 
-    - name: Find backup files
+    - name: Locate the newest database backup file
       find:
-        paths: "{{ backup_dir }}"
+        paths: /opt/appdata/pgsql/backups
         patterns: "nexusdb2-*.bk"
-        file_type: file
       register: backup_files
 
-    - name: Fail if no backup file found
-      fail:
-        msg: "No backup file found in {{ backup_dir }}"
-      when: backup_files.matched | int == 0
-
-    - name: Set latest backup vars
+    - name: Set facts for backup file path and name
       set_fact:
         latest_backup_path: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
         backup_filename: "{{ (backup_files.files | sort(attribute='mtime') | last).path | basename }}"
 
-    - name: Copy DB backup to target /tmp
-      command: >
-        scp -p "{{ latest_backup_path }}"
-        "{{ target_user }}@{{ target_host }}:{{ target_db_dest }}/{{ backup_filename }}"
+    - name: Transfer database backup to target server via SCP
+      command: scp -pr "{{ latest_backup_path }}" cmdeploy@lxpd211:
 
-    - name: Create Node ID archive
+    - name: Compress Nexus Node ID keystores
       become_user: root
-      command: >
-        tar -czf "{{ node_archive }}"
-        -C "{{ node_dir | dirname }}"
-        "{{ node_dir | basename }}"
+      command: tar -czvf /tmp/nexus-node-id.tar.gz -C /opt/appdata/nexus/sonatype-work/nexus3/keystores node
+      args:
+        chdir: /tmp
 
-    - name: Set permissions on Node ID archive
+    - name: Set permissions for Node ID archive
       become_user: root
       file:
-        path: "{{ node_archive }}"
-        mode: "0644"
+        path: /tmp/nexus-node-id.tar.gz
+        mode: '0777'
 
-    - name: Copy Node ID archive to target /tmp
-      command: >
-        scp -p "{{ node_archive }}"
-        "{{ target_user }}@{{ target_host }}:{{ target_node_dest }}/nexus-node-id.tar.gz"
+    - name: Transfer Node ID archive to target server via SCP
+      command: scp -pr /tmp/nexus-node-id.tar.gz cmdeploy@lxpd211:/tmp/
 
-# =======================================================================
-# Step 3: Prepare DB and Node ID files on Target (lxpd211)
-# =======================================================================
-- hosts: lxpd211
+- name: Prepare DB and Node ID files on target server
+  hosts: lxpd211
   gather_facts: no
   any_errors_fatal: true
-  vars:
-    target_db_dest: "/tmp"
-    target_node_archive: "/tmp/nexus-node-id.tar.gz"
   tasks:
-    - name: Verify DB backup exists in /tmp
-      stat:
-        path: "{{ target_db_dest }}/{{ hostvars['lxpd194']['backup_filename'] }}"
-      register: db_stat
+    - name: Move database backup to tmp directory as cmdeploy
+      command: cp "~/{{ hostvars['lxpd194']['backup_filename'] }}" /tmp/
+      args:
+        chdir: /tmp
+      
+    - name: Set permissions on tmp database backup file
+      file:
+        path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+        mode: '0777'
 
-    - name: Fail if DB backup missing in /tmp
-      fail:
-        msg: "DB backup not found: {{ target_db_dest }}/{{ hostvars['lxpd194']['backup_filename'] }}"
-      when: not db_stat.stat.exists
-
-    - name: Copy DB backup from /tmp to postgres home
+    - name: Move database backup to postgres home directory
       become: yes
       become_user: postgres
-      become_flags: "-i"
-      command: cp "{{ target_db_dest }}/{{ hostvars['lxpd194']['backup_filename'] }}" .
+      command: cp "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}" ~postgres/
+      args:
+        chdir: /tmp
 
-    - name: Verify Node ID archive exists in /tmp
-      stat:
-        path: "{{ target_node_archive }}"
-      register: node_stat
-
-    - name: Fail if Node ID archive missing in /tmp
-      fail:
-        msg: "Node ID archive not found: {{ target_node_archive }}"
-      when: not node_stat.stat.exists
-
-    # ===================================================================
-    # [Commented Out] Restore Operations
-    # ===================================================================
     # - name: Restore PostgreSQL database
     #   become: yes
     #   become_user: postgres
-    #   become_flags: "-i"
-    #   command: pg_restore -U postgres -d nexusdb2 --clean "~/{{ hostvars['lxpd194']['backup_filename'] }}"
+    #   command: pg_restore -U postgres -d nexusdb --clean "~postgres/{{ hostvars['lxpd194']['backup_filename'] }}"
+    #   args:
+    #     chdir: /tmp
 
     # - name: Extract Node ID archive
     #   become: yes
-    #   command: tar -xzf "{{ target_node_archive }}" -C "/opt/appdata/nexus/sonatype-work/nexus3/keystores"
-
+    #   command: tar -xzvf /tmp/nexus-node-id.tar.gz -C /opt/appdata/nexus/sonatype-work/nexus3/keystores
+    #   args:
+    #     chdir: /tmp
+    
     # - name: Ensure correct ownership for restored Node ID
     #   become: yes
     #   file:
-    #     path: "/opt/appdata/nexus/sonatype-work/nexus3/keystores/node"
+    #     path: /opt/appdata/nexus/sonatype-work/nexus3/keystores/node
     #     state: directory
     #     owner: nexus
     #     group: nexus
     #     recurse: yes
 
-# =======================================================================
-# [Commented Out] Step 5: Start Nexus Application
-# =======================================================================
-# - hosts: lxpd208,lxpd209
+# - name: Start Nexus application
+#   hosts: lxpd208, lxpd209
 #   gather_facts: no
 #   any_errors_fatal: true
 #   become: yes
