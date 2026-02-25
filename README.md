@@ -1,109 +1,25 @@
----
-# =======================================================================
-# Step 1: Stop Nexus Application (commented out for testing)
-# =======================================================================
-# - hosts: lxpd208,lxpd209
-#   gather_facts: no
-#   any_errors_fatal: true
-#   become: yes
-#   tasks:
-#     - name: Stop nexus service
-#       systemd:
-#         name: nexus
-#         state: stopped
+#!/bin/bash
+set -euo pipefail
 
-# =======================================================================
-# Step 2: Backup DB on Source Server (lxpd194) and copy to lxpd211
-# =======================================================================
-- hosts: lxpd194
-  gather_facts: no
-  any_errors_fatal: true
-  become: yes
-  become_user: postgres
-  vars:
-    current_date: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
-    target_filename: "nexusdb2-{{ current_date }}.bk"
-    backup_dir: "{{ lookup('env', 'HOME') }}/backups"
-  tasks:
-    - name: Run backup script
-      shell: ./backupnexusDB.bsh
-      args:
-        chdir: "{{ lookup('env', 'HOME') }}"
+TODAY="$(date +%Y-%m-%d_%H%M%S)"
+ARCHIVE="nexusdb2-${TODAY}.bk"
+BACKUP_DIR="/opt/appdata/pgsql/backups"
 
-    - name: Find backup files
-      find:
-        paths: "{{ backup_dir }}"
-        patterns: "nexusdb2-*.bk"
-      register: backup_files
+echo "========================================================"
+echo "Starting Nexus PostgreSQL DB Backup"
+echo "Timestamp: ${TODAY}"
+echo "Output: ${BACKUP_DIR}/${ARCHIVE}"
+echo "========================================================"
 
-    - name: Fail if no backup file found
-      fail:
-        msg: "No backup file found in {{ backup_dir }}"
-      when: backup_files.matched | int == 0
+mkdir -p "${BACKUP_DIR}"
+cd "${BACKUP_DIR}"
 
-    - name: Set latest backup path
-      set_fact:
-        latest_backup: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
+# Use custom format (-Fc). Add -v if you want verbose output.
+# If you need a specific host/port/user/db, set PG* env vars or add -h/-p/-U <db>.
+/usr/bin/pg_dump -Fc nexusdb2 > "${ARCHIVE}"
 
-    - name: Rename backup to expected filename
-      command: mv "{{ latest_backup }}" "{{ backup_dir }}/{{ target_filename }}"
+# Prefer least-privilege. Use 0644 unless you truly need world-writable.
+chmod 0644 "${ARCHIVE}"
 
-    - name: Set permissions on backup file
-      file:
-        path: "{{ backup_dir }}/{{ target_filename }}"
-        mode: "0644"
-
-    - name: Copy backup to lxpd211 (to cmdeploy home)
-      command: scp -p "{{ backup_dir }}/{{ target_filename }}" "cmdeploy@lxpd211:{{ target_filename }}"
-
-# =======================================================================
-# Step 3: Prepare DB file on Target Server (lxpd211)
-# =======================================================================
-- hosts: lxpd211
-  gather_facts: no
-  any_errors_fatal: true
-  vars:
-    current_date: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
-    target_filename: "nexusdb2-{{ current_date }}.bk"
-  tasks:
-    - name: Verify backup exists in cmdeploy home
-      stat:
-        path: "{{ lookup('env', 'HOME') }}/{{ target_filename }}"
-      register: bk_stat
-
-    - name: Fail if backup is missing
-      fail:
-        msg: "Backup file not found in cmdeploy home: {{ target_filename }}"
-      when: not bk_stat.stat.exists
-
-    - name: Copy backup to /tmp
-      command: cp "{{ lookup('env', 'HOME') }}/{{ target_filename }}" "/tmp/{{ target_filename }}"
-
-    - name: Set permissions on /tmp backup file
-      file:
-        path: "/tmp/{{ target_filename }}"
-        mode: "0644"
-
-    - name: Copy backup from /tmp to postgres home
-      become: yes
-      become_user: postgres
-      command: cp "/tmp/{{ target_filename }}" "{{ lookup('env', 'HOME') }}/{{ target_filename }}"
-
-    # Restore is intentionally commented out
-    # - name: Restore database
-    #   become: yes
-    #   become_user: postgres
-    #   command: pg_restore -U postgres -d nexusdb --clean "{{ lookup('env', 'HOME') }}/{{ target_filename }}"
-
-# =======================================================================
-# Step 4: Start Nexus Application (commented out for testing)
-# =======================================================================
-# - hosts: lxpd208,lxpd209
-#   gather_facts: no
-#   any_errors_fatal: true
-#   become: yes
-#   tasks:
-#     - name: Start nexus service
-#       systemd:
-#         name: nexus
-#         state: started
+echo "Backup completed: ${ARCHIVE}"
+echo "========================================================"
