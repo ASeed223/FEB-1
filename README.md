@@ -1,30 +1,9 @@
-- name: Prepare and Restore database on target server
-  hosts: lxpd211
-  gather_facts: no
-  any_errors_fatal: true
-  become: yes
-  become_user: postgres
-  tasks:
-    - name: Set permissions on tmp database backup file
-      become: no
-      file:
-        path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
-        mode: '0777'
+Good morning everyone,
 
-    - name: Copy database backup to postgres home directory
-      command: cp "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}" ~postgres/
-      args:
-        chdir: /tmp
+Yesterday I spent most of the day continuing the Nexus cleanup with Brandon and Edgar. By the end of the day, we were able to recover another 200 GB of disk space, so we shouldn’t need to worry about Nexus disk space for a while.
 
-    - name: Force disconnect any active connections to nexusdb
-      command: psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'nexusdb' AND pid <> pg_backend_pid();"
-      ignore_errors: yes
+In addition, I worked on an Ansible playbook to copy the PostgreSQL database backup from lxpd195 to lxpd211 to keep the database in sync.
 
-    - name: Drop existing dirty nexusdb
-      command: dropdb --if-exists nexusdb
+Today, I’ll continue focusing on that task and will also be attending a few meetings.
 
-    - name: Create fresh empty nexusdb
-      command: createdb -O nexdbuser nexusdb
-
-    - name: Restore PostgreSQL database
-      command: pg_restore -U postgres -d nexusdb "~postgres/{{ hostvars['lxpd194']['backup_filename'] }}"
+That’s my plan for today.
