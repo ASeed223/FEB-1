@@ -10,7 +10,7 @@
 #         name: nexus
 #         state: stopped
 
-- name: Backup database on source server
+- name: Backup and direct transfer from source server
   hosts: lxpd194
   gather_facts: no
   any_errors_fatal: true
@@ -32,13 +32,17 @@
     - name: Set facts for backup file path and name
       become_user: postgres
       set_fact:
-        latest_backup_path: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
         backup_filename: "{{ (backup_files.files | sort(attribute='mtime') | last).path | basename }}"
 
-    # Directly transfer from lxpd194 to lxpd211 using scp
-    - name: Direct SCP backup to target server
+    - name: Change permissions to 777 on source backup file
       become_user: postgres
-      command: scp -pr "{{ backup_filename }}" cmdeploy@lxpd211:
+      file:
+        path: "/opt/appdata/pgsql/backups/{{ backup_filename }}"
+        mode: '0777'
+
+    - name: Direct SCP transfer to target server (Non-interactive)
+      become_user: postgres
+      command: scp -o StrictHostKeyChecking=no -o BatchMode=yes -pr "{{ backup_filename }}" cmdeploy@lxpd211:/tmp/
       args:
         chdir: /opt/appdata/pgsql/backups
 
@@ -47,12 +51,6 @@
   gather_facts: no
   any_errors_fatal: true
   tasks:
-    # File lands in cmdeploy home directory via SCP, move to /tmp
-    - name: Copy backup from cmdeploy home to tmp
-      command: cp "~/{{ hostvars['lxpd194']['backup_filename'] }}" /tmp/
-      args:
-        chdir: /tmp
-
     - name: Set permissions on tmp database backup file
       file:
         path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
