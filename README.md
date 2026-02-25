@@ -15,26 +15,33 @@
   gather_facts: no
   any_errors_fatal: true
   become: yes
-  become_user: postgres
   tasks:
     - name: Execute database backup script
+      become_user: postgres
       shell: bash ~postgres/backupnexusDB.bsh
       args:
         chdir: /tmp
 
     - name: Locate the newest database backup file
+      become_user: postgres
       find:
         paths: /opt/appdata/pgsql/backups
         patterns: "nexusdb2-*.bk"
       register: backup_files
 
     - name: Set facts for backup file path and name
+      become_user: postgres
       set_fact:
         latest_backup_path: "{{ (backup_files.files | sort(attribute='mtime') | last).path }}"
         backup_filename: "{{ (backup_files.files | sort(attribute='mtime') | last).path | basename }}"
 
-    - name: Transfer database backup to target server via SCP
-      command: scp -pr "{{ latest_backup_path }}" cmdeploy@lxpd211:
+    # Use 'fetch' to download from lxpd194 to Ansible controller
+    - name: Fetch database backup to Ansible controller
+      become_user: postgres
+      fetch:
+        src: "{{ latest_backup_path }}"
+        dest: "/tmp/{{ backup_filename }}"
+        flat: yes
 
     - name: Compress Nexus Node ID keystores
       become_user: root
@@ -42,28 +49,30 @@
       args:
         chdir: /tmp
 
-    - name: Set permissions for Node ID archive
+    # Use 'fetch' to download Node ID archive to Ansible controller
+    - name: Fetch Node ID archive to Ansible controller
       become_user: root
-      file:
-        path: /tmp/nexus-node-id.tar.gz
-        mode: '0777'
-
-    - name: Transfer Node ID archive to target server via SCP
-      command: scp -pr /tmp/nexus-node-id.tar.gz cmdeploy@lxpd211:/tmp/
+      fetch:
+        src: /tmp/nexus-node-id.tar.gz
+        dest: /tmp/nexus-node-id.tar.gz
+        flat: yes
 
 - name: Prepare DB and Node ID files on target server
   hosts: lxpd211
   gather_facts: no
   any_errors_fatal: true
   tasks:
-    - name: Move database backup to tmp directory as cmdeploy
-      command: cp "~/{{ hostvars['lxpd194']['backup_filename'] }}" /tmp/
-      args:
-        chdir: /tmp
-      
-    - name: Set permissions on tmp database backup file
-      file:
-        path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+    # Use 'copy' to upload from Ansible controller to lxpd211
+    - name: Copy database backup to target server tmp
+      copy:
+        src: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+        dest: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+        mode: '0777'
+
+    - name: Copy Node ID archive to target server tmp
+      copy:
+        src: /tmp/nexus-node-id.tar.gz
+        dest: /tmp/nexus-node-id.tar.gz
         mode: '0777'
 
     - name: Move database backup to postgres home directory
@@ -82,12 +91,14 @@
 
     # - name: Extract Node ID archive
     #   become: yes
+    #   become_user: root
     #   command: tar -xzvf /tmp/nexus-node-id.tar.gz -C /opt/appdata/nexus/sonatype-work/nexus3/keystores
     #   args:
     #     chdir: /tmp
     
     # - name: Ensure correct ownership for restored Node ID
     #   become: yes
+    #   become_user: root
     #   file:
     #     path: /opt/appdata/nexus/sonatype-work/nexus3/keystores/node
     #     state: directory
