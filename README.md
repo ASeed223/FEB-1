@@ -1,4 +1,3 @@
----
 - name: Stop Nexus HA 01 on lxpd208
   hosts: lxpd208
   gather_facts: no
@@ -116,16 +115,11 @@
   become: yes
   become_user: postgres
   tasks:
-    - name: Set permissions on tmp database backup file
-      become: no
-      file:
-        path: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
-        mode: '0777'
-
-    - name: Copy database backup to postgres home directory
-      command: cp "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}" ~postgres/
-      args:
-        chdir: /tmp
+    - name: Copy database backup from Ansible controller to postgres home directory
+      copy:
+        src: "/tmp/{{ hostvars['lxpd194']['backup_filename'] }}"
+        dest: "~postgres/{{ hostvars['lxpd194']['backup_filename'] }}"
+        mode: '0600'
 
     - name: Force disconnect any active connections to nexusdb
       command: psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'nexusdb' AND pid <> pg_backend_pid();"
