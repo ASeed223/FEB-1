@@ -1,5 +1,1 @@
-am reporting a specific issue with our Docker-hosted repositories following an upgrade from Nexus 3.70 to 3.89. While we have been using a PostgreSQL architecture since version 3.70, this is our first time implementing the pg_trgm extension as required by the newer version. Currently, all Docker-related repositories are completely empty in the "Browse" UI, showing "No components/assets found." However, this appears to be strictly a display issue; the Search function is working correctly, the Administration panel accurately reflects our repository sizes (including one at 1.4 TB), and our teams are still able to successfully docker pull images and run their services.
-
-To resolve this, I have already enabled the pg_trgm extension in our PostgreSQL instance and executed the Repair - Rebuild repository browse and Repair - Rebuild repository search tasks per official documentation. Despite these efforts, the Browse tree remains unpopulated for our Docker assets specifically. I have attached the Support Zip and relevant logs for your review and would appreciate your help in identifying why these nodes are not being generated so we can restore full visibility for our users.
-
-Would you like me to help you double-check the logs for any specific error strings before you hit send?
+Docker repositories empty in Browse UI after 3.70 to 3.89 upgrade (PostgreSQL)
