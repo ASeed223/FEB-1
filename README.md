@@ -1,4 +1,6 @@
-Nexus Upgrade Status Update
-Hi team, I want to provide a quick update on the Nexus upgrade. Nexus is now successfully up and running, but I’ve identified a display issue where the "Browse" UI appears empty. I believe this is a known side effect of how the new version handles indexing via the pg_trgm extension.
-I want to emphasize that this is strictly a display issue within the web interface. I’ve already verified with Nemai and Anatoliy from the OCP team and they confirmed that pulling images is working perfectly, so this should not cause any production outages.
-To fix the UI, I have initiated the Repair - Rebuild repository browse and Repair - Rebuild repository search tasks in Nexus. Because we have over 2.5 TB of data, this rebuild process will take a significant amount of time to complete. But if the UI is still not populated by tomorrow, I will generate a Sonatype Support Zip and open a ticket with their engineering team for a deeper look. Since we have snapshots saved for 7 days, so we can discuss a restore if is necessary on Monday.
+Hi team,
+I want to provide a quick update on the Nexus upgrade. Nexus is now successfully up and running. However, I’ve identified a display issue where the “Browse” UI appears empty. I believe this is a known side effect related to how the new version handles indexing with the pg_trgm extension. I want to emphasize that this is strictly a display issue within the web interface. I’ve already verified with Nemai and Anatoliy from the OCP team, and they confirmed that pulling images is working perfectly. Therefore, this should not cause any production outages.
+To address the UI issue, I have initiated the following tasks in Nexus: Repair – Rebuild repository browse and Repair – Rebuild repository search
+The search feature now seems to be working, but the Browse function is still unavailable.
+I have generated a Sonatype Support ZIP and opened a ticket with their engineering team for further investigation. However, I’m not sure when they will respond. I will continue to monitor my email over the weekend.
+Since we have snapshots retained for 7 days, we can discuss a restore on Monday if necessary.
