@@ -1,10 +1,9 @@
-Hi Sonatype Support Team,
+Hi everyone,
 
-This is Shushen from the State of California Franchise Tax Board. I am the Nexus Admin for our department.
+The Nexus upgrade has been completed and the system is now up and available for use.
 
-When I try to use the ftbedrcmteam@ftb.ca.gov
- Sonatype account to access the support portal, I receive the following message: “This account is not an authorized support contact.”
+However, we are currently seeing an issue with the Browse feature in the new version. This appears to be a UI/display issue only. All core functions, including pulling images, are working as expected. We have opened a ticket with Sonatype Support and are working with their engineering team to resolve it.
 
-Could you please help grant this account access to the support portal? We are currently experiencing an issue related to our Nexus upgrade, and I need access in order to follow up on the support ticket.
+If the Browse issue cannot be resolved, we may consider rolling back. The current snapshot was taken on 02/27 at 8:00 PM, which includes the RHEL OS patches.
 
-Thank you for your assistance.
+I will continue to monitor the situation and provide updates as needed.
