@@ -1,1 +1,1 @@
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+cat /opt/appdata/nexus/sonatype-work/nexus3/etc/fabric/nexus-store.properties
